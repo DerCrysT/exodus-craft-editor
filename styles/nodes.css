@@ -1,0 +1,410 @@
+/* ============================================================
+   EXODUS CRAFT EDITOR — Craft Nodes
+   ============================================================ */
+
+.craft-node {
+  position: absolute;
+  width: 180px;
+  background: var(--node-bg);
+  border: 1px solid var(--node-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px var(--node-shadow);
+  cursor: default;
+  user-select: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
+  z-index: 1;
+}
+
+.craft-node:hover {
+  border-color: var(--border-strong);
+  box-shadow: 0 6px 24px var(--node-shadow);
+}
+
+.craft-node.selected {
+  border-color: var(--node-selected);
+  box-shadow: 0 0 0 2px var(--accent-dim), 0 6px 24px var(--node-shadow);
+  z-index: 2;
+}
+
+/* ── Node Header ── */
+.node-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--node-border);
+  cursor: grab;
+}
+.node-header:active { cursor: grabbing; }
+
+.node-thumb {
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  object-fit: contain;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+}
+
+.node-thumb-placeholder {
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.node-title-area {
+  flex: 1;
+  min-width: 0;
+}
+
+.node-classname {
+  font-size: 10px;
+  color: var(--text-muted);
+  truncate: true;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-display-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Node Body ── */
+.node-body {
+  padding: 6px 10px;
+}
+
+.node-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text-muted);
+  padding: 1px 0;
+}
+
+.node-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 500;
+  background: var(--accent-dim);
+  color: var(--accent);
+}
+
+.node-badge.craft-type-craft   { background: rgba(61,186,126,0.15); color: var(--success); }
+.node-badge.craft-type-disassemble { background: rgba(232,168,64,0.15); color: var(--warning); }
+.node-badge.craft-type-repair  { background: rgba(77,142,240,0.15); color: var(--info); }
+
+/* ── Port (connection point) ── */
+.node-ports {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0 4px;
+}
+
+.port {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  border: 2px solid var(--accent);
+  cursor: crosshair;
+  transition: transform 0.12s, background 0.12s;
+  z-index: 10;
+}
+
+.port:hover, .port.hovered {
+  transform: scale(1.4);
+  background: var(--accent);
+}
+
+.port.port-in {
+  top: 50%;
+  left: -6px;
+  transform: translateY(-50%);
+}
+.port.port-in:hover {
+  transform: translateY(-50%) scale(1.4);
+}
+
+.port.port-out {
+  top: 50%;
+  right: -6px;
+  transform: translateY(-50%);
+}
+.port.port-out:hover {
+  transform: translateY(-50%) scale(1.4);
+}
+
+/* ── Edge SVG ── */
+.craft-edge {
+  fill: none;
+  stroke: var(--edge-color);
+  stroke-width: 2;
+  stroke-linecap: round;
+  cursor: pointer;
+  pointer-events: stroke;
+  transition: stroke 0.12s, stroke-width 0.12s;
+  opacity: 0.7;
+}
+.craft-edge:hover { stroke: var(--edge-hover); stroke-width: 3; opacity: 1; }
+.craft-edge.selected { stroke: var(--accent); stroke-width: 3; opacity: 1; }
+
+.edge-amount-label {
+  fill: var(--text-secondary);
+  font-size: 10px;
+  font-family: inherit;
+  pointer-events: none;
+}
+
+.edge-draft {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 5 4;
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+/* ── Library Item ── */
+.lib-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: grab;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.1s;
+}
+.lib-item:hover { background: var(--bg-hover); }
+.lib-item:active { cursor: grabbing; }
+
+.lib-thumb {
+  width: 24px;
+  height: 24px;
+  border-radius: 3px;
+  background: var(--bg-elevated);
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.lib-name {
+  font-size: 12px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.lib-classname {
+  font-size: 10px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Library Search ── */
+.lib-search {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.lib-search-input {
+  width: 100%;
+  padding: 5px 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-size: 12px;
+  outline: none;
+}
+.lib-search-input:focus { border-color: var(--accent); }
+.lib-search-input::placeholder { color: var(--text-muted); }
+
+/* ── Node meta rows ── */
+.node-meta-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+.node-meta-val {
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Node action button (⚙ top-right) ── */
+.node-action-btn {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.1s;
+}
+.craft-node:hover .node-action-btn,
+.craft-node.selected .node-action-btn {
+  opacity: 1;
+}
+.node-action-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* ── Alignment toolbar buttons ── */
+#align-toolbar .zoom-btn {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.recipe-list {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.recipe-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  transition: border-color 0.1s;
+}
+.recipe-card:hover { border-color: var(--border-strong); }
+.recipe-card.selected { border-color: var(--accent); }
+
+.recipe-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  background: var(--bg-elevated);
+}
+
+.recipe-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  flex: 1;
+}
+
+.recipe-card-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.recipe-card-body {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+}
+
+/* Component list */
+.component-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.component-row .field-input {
+  flex: 1;
+}
+
+/* ── Comment Node ── */
+.comment-node {
+  position: absolute;
+  min-width: 160px;
+  max-width: 320px;
+  min-height: 60px;
+  border-radius: 6px;
+  border: 1.5px dashed rgba(255,200,50,0.5);
+  cursor: default;
+  user-select: none;
+  z-index: 1;
+  overflow: hidden;
+}
+.comment-node.selected { border-color: var(--accent); border-style: solid; }
+.comment-drag-handle {
+  padding: 4px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255,200,50,0.7);
+  cursor: grab;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.comment-drag-handle:active { cursor: grabbing; }
+.comment-text {
+  padding: 4px 10px 8px;
+  font-size: 12px;
+  color: var(--text-primary);
+  line-height: 1.5;
+  min-height: 32px;
+  outline: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: default;
+}
+.comment-text[contenteditable="true"] {
+  cursor: text;
+  background: rgba(0,0,0,0.1);
+  border-radius: 3px;
+}
+.comment-edit-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: transparent;
+  border: none;
+  color: rgba(255,200,50,0.6);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.comment-node:hover .comment-edit-btn { opacity: 1; }
+.comment-edit-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
+
+/* ── Node Hover Tooltip ── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateX(-4px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+#node-hover-tooltip { animation: fadeIn 0.15s ease; }

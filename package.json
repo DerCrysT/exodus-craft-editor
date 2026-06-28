@@ -1,0 +1,16 @@
+{
+  "name": "exodus-craft-editor",
+  "version": "1.0.0",
+  "description": "Visual Crafting Recipe Editor for DayZ Exodus Mod",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5",
+    "vite": "^5.2.11"
+  }
+}

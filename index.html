@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Exodus Craft Editor</title>
+  <link rel="stylesheet" href="/styles/base.css" />
+  <link rel="stylesheet" href="/styles/layout.css" />
+  <link rel="stylesheet" href="/styles/nodes.css" />
+</head>
+<body>
+  <div id="app">
+
+    <!-- ── Toolbar ── -->
+    <header id="toolbar">
+      <span class="toolbar-brand">⚙ EXODUS CRAFT</span>
+      <div class="toolbar-divider"></div>
+
+      <!-- Mode Switch -->
+      <div class="toolbar-group" id="tb-mode-group">
+        <button class="tb-btn active" id="tb-node-mode" data-tooltip="Node Editor">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <circle cx="3" cy="8" r="2"/><circle cx="13" cy="3" r="2"/><circle cx="13" cy="13" r="2"/>
+            <line x1="5" y1="8" x2="11" y2="4" stroke="currentColor" stroke-width="1.5"/>
+            <line x1="5" y1="8" x2="11" y2="12" stroke="currentColor" stroke-width="1.5"/>
+          </svg>
+          Nodes
+        </button>
+        <button class="tb-btn" id="tb-form-mode" data-tooltip="Formular Editor">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="2" y="2" width="12" height="3" rx="1"/>
+            <rect x="2" y="7" width="12" height="3" rx="1"/>
+            <rect x="2" y="12" width="7" height="2" rx="1"/>
+          </svg>
+          Formular
+        </button>
+      </div>
+
+      <div class="toolbar-divider"></div>
+
+      <!-- Workbench -->
+      <select class="tb-select" id="tb-workbench" data-tooltip="Werkbank">
+        <option value="Kleidung">Kleidung</option>
+        <option value="Medizin">Medizin</option>
+        <option value="Waffen">Waffen</option>
+        <option value="Werkbank">Werkbank</option>
+        <option value="Wissenschaft">Wissenschaft</option>
+      </select>
+
+      <!-- Faction -->
+      <select class="tb-select" id="tb-faction" data-tooltip="Fraktion">
+        <option value="">— Keine Fraktion —</option>
+        <option value="Badnits">Badnits</option>
+        <option value="ClearSky">ClearSky</option>
+        <option value="Digger">Digger</option>
+        <option value="Duty">Duty</option>
+        <option value="Ecologist">Ecologist</option>
+        <option value="Freedom">Freedom</option>
+        <option value="FreeStalker">FreeStalker</option>
+        <option value="IPSF">IPSF</option>
+        <option value="Loner">Loner</option>
+        <option value="Mercenary">Mercenary</option>
+        <option value="Military">Military</option>
+        <option value="Monoltih">Monoltih</option>
+        <option value="Noontide">Noontide</option>
+        <option value="Spark">Spark</option>
+        <option value="UNISG">UNISG</option>
+        <option value="Warden">Warden</option>
+      </select>
+
+      <div class="toolbar-divider"></div>
+
+      <!-- Actions -->
+      <div class="toolbar-group">
+        <button class="tb-btn" id="tb-undo" data-tooltip="Rückgängig (Ctrl+Z)">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M3 8a5 5 0 1 1 1.5 3.5" stroke-linecap="round"/>
+            <polyline points="3,4 3,8 7,8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <button class="tb-btn" id="tb-redo" data-tooltip="Wiederholen (Ctrl+Y)">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M13 8a5 5 0 1 0-1.5 3.5" stroke-linecap="round"/>
+            <polyline points="13,4 13,8 9,8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+
+      <div class="toolbar-divider"></div>
+
+      <div class="toolbar-group">
+        <button class="tb-btn" id="tb-import" data-tooltip="JSON importieren">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M8 2v8M5 7l3 3 3-3" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M2 12v1a1 1 0 001 1h10a1 1 0 001-1v-1" stroke-linecap="round"/>
+          </svg>
+          Import
+        </button>
+        <button class="tb-btn" id="tb-export" data-tooltip="JSON exportieren">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M8 10V2M5 5l3-3 3 3" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M2 12v1a1 1 0 001 1h10a1 1 0 001-1v-1" stroke-linecap="round"/>
+          </svg>
+          Export
+        </button>
+        <button class="tb-btn" id="tb-save-project" data-tooltip="Projekt speichern (.exoduscraft)">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M3 2h8l3 3v9a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z" stroke-linecap="round"/>
+            <path d="M5 2v4h6V2M5 13v-4h6v4" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Speichern
+        </button>
+        <button class="tb-btn" id="tb-versioning" data-tooltip="Versionsverlauf (Ctrl+Shift+S)">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="8" cy="8" r="6"/><polyline points="8,4 8,8 11,10" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Versionen
+        </button>
+        <button class="tb-btn" id="tb-upload-center" data-tooltip="Upload Center — Bilder zuweisen">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M8 10V2M5 5l3-3 3 3" stroke-linecap="round" stroke-linejoin="round"/>
+            <rect x="2" y="11" width="12" height="3" rx="1" fill="currentColor" stroke="none" opacity="0.4"/>
+          </svg>
+          Upload
+        </button>
+      </div>
+
+      <div class="toolbar-spacer"></div>
+
+      <!-- Theme + Settings -->
+      <div class="toolbar-group">
+        <select class="tb-select" id="tb-theme">
+          <option value="dark">Dark</option>
+          <option value="soft-dark">Soft Dark</option>
+          <option value="light">Light</option>
+        </select>
+        <button class="tb-btn" id="tb-validate" data-tooltip="Validierung ausführen">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M8 2L2 5v4c0 3.3 2.5 6.4 6 7.2C12.5 15.4 14 12.3 14 9V5L8 2z" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M5.5 8l2 2 3-3" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Prüfen
+        </button>
+        <button class="tb-btn" id="tb-dep-graph" data-tooltip="Dependency Graph anzeigen">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="3" cy="8" r="2"/><circle cx="13" cy="3" r="2"/><circle cx="13" cy="13" r="2"/>
+            <circle cx="8" cy="8" r="1.5"/>
+            <line x1="5" y1="8" x2="6.5" y2="8" stroke="currentColor"/>
+            <line x1="9.5" y1="8" x2="11" y2="4" stroke="currentColor"/>
+            <line x1="9.5" y1="8" x2="11" y2="12" stroke="currentColor"/>
+          </svg>
+          Dep Graph
+        </button>
+        <button class="tb-btn" id="tb-mass-edit" data-tooltip="Mehrere Nodes gleichzeitig bearbeiten">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="1" y="2" width="6" height="5" rx="1"/>
+            <rect x="9" y="2" width="6" height="5" rx="1"/>
+            <rect x="1" y="9" width="6" height="5" rx="1"/>
+            <rect x="9" y="9" width="6" height="5" rx="1"/>
+            <path d="M4 4.5h2M12 4.5h2M4 11.5h2M12 11.5h2" stroke-linecap="round"/>
+          </svg>
+          Mass Edit
+        </button>
+      </div>
+    </header>
+
+    <!-- ── Library Panel ── -->
+    <aside id="library-panel">
+      <div class="panel-header">
+        <span>Classname Library</span>
+        <button class="btn btn-ghost btn-sm btn-icon" id="lib-add-btn" data-tooltip="Item hinzufügen">+</button>
+      </div>
+      <div class="lib-search">
+        <input type="text" class="lib-search-input" id="lib-search" placeholder="Suche Classname…" />
+      </div>
+      <div class="panel-body" id="lib-list">
+        <!-- Library items injected here -->
+      </div>
+    </aside>
+
+    <!-- ── Canvas / Main ── -->
+    <main id="canvas-area">
+
+      <!-- Node Editor -->
+      <div id="node-editor-root" style="position:absolute;inset:0;">
+        <div class="canvas-grid"></div>
+        <div id="canvas-nodes"></div>
+        <svg id="canvas-edges" xmlns="http://www.w3.org/2000/svg" style="position:absolute;inset:0;overflow:visible;pointer-events:none;">
+          <defs>
+            <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L8,3 z" fill="var(--edge-color)" />
+            </marker>
+          </defs>
+          <g id="edges-group"></g>
+          <path id="draft-edge" class="edge-draft" d="" style="display:none"/>
+        </svg>
+        <div id="selection-box" class="selection-box" style="display:none"></div>
+        <div id="zoom-controls">
+          <button class="zoom-btn" id="zoom-in" data-tooltip="Zoom in">+</button>
+          <button class="zoom-btn" id="zoom-reset" data-tooltip="Zoom zurücksetzen" style="font-size:11px">1:1</button>
+          <button class="zoom-btn" id="zoom-out" data-tooltip="Zoom out">−</button>
+        </div>
+        <canvas id="minimap"></canvas>
+      </div>
+
+      <!-- Form Editor (hidden by default) -->
+      <div id="form-editor-root" style="display:none;position:absolute;inset:0;overflow-y:auto;">
+        <!-- Injected by FormEditor -->
+      </div>
+
+      <!-- Validation Log -->
+      <div id="validation-log">
+        <div id="validation-items"></div>
+      </div>
+    </main>
+
+    <!-- ── Properties Panel ── -->
+    <aside id="props-panel">
+      <div class="tabs" id="props-tabs">
+        <div class="tab active" data-tab="properties">Eigenschaften</div>
+        <div class="tab" data-tab="json">JSON Preview</div>
+      </div>
+      <div id="props-content" style="flex:1;overflow:hidden;display:flex;flex-direction:column;">
+        <!-- Properties tab -->
+        <div id="tab-properties" class="panel-body">
+          <div class="empty-state" id="props-empty">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r="0.5" fill="currentColor"/>
+            </svg>
+            <p>Node auswählen<br/>um Eigenschaften zu bearbeiten</p>
+          </div>
+          <div id="props-form" style="display:none"></div>
+        </div>
+        <!-- JSON tab -->
+        <div id="tab-json" style="display:none;flex:1;overflow:hidden;flex-direction:column;display:flex;">
+          <div style="flex:1;overflow:auto;padding:8px;">
+            <pre id="json-preview" style="font-size:11px;color:var(--text-secondary);white-space:pre-wrap;word-break:break-all;"></pre>
+          </div>
+          <div style="padding:8px;border-top:1px solid var(--border);display:flex;gap:6px;">
+            <button class="btn btn-secondary btn-sm" id="json-copy">Kopieren</button>
+            <button class="btn btn-primary btn-sm" id="json-export-btn">Exportieren</button>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ── Status Bar ── -->
+    <footer id="statusbar">
+      <div class="statusbar-item">
+        <div class="statusbar-dot" id="save-dot"></div>
+        <span id="save-status">Gespeichert</span>
+      </div>
+      <div class="statusbar-item" id="sb-nodes">0 Nodes</div>
+      <div class="statusbar-item" id="sb-edges">0 Verbindungen</div>
+      <div class="statusbar-item" id="sb-recipes">0 Rezepte</div>
+      <div class="statusbar-item" id="sb-zoom">100%</div>
+      <div class="statusbar-item" id="sb-mode">Node Editor</div>
+      <div class="statusbar-item" id="sb-workbench">Exodus_WB_Kleidung</div>
+    </footer>
+
+  </div>
+
+  <!-- Hidden file inputs -->
+  <input type="file" id="import-json-input" accept=".json" style="display:none" />
+  <input type="file" id="import-project-input" accept=".exoduscraft,.json" style="display:none" />
+  <input type="file" id="upload-image-input" accept="image/*" style="display:none" />
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

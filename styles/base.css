@@ -1,0 +1,157 @@
+/* ============================================================
+   EXODUS CRAFT EDITOR — Base + Themes
+   ============================================================ */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* ── Dark Theme (default) ── */
+[data-theme="dark"] {
+  --bg-base:        #0e1117;
+  --bg-surface:     #161b24;
+  --bg-elevated:    #1e2636;
+  --bg-hover:       #252e42;
+  --bg-active:      #2d3a54;
+
+  --border:         #2a3448;
+  --border-strong:  #3d4f6e;
+
+  --text-primary:   #e8edf5;
+  --text-secondary: #8a9bbf;
+  --text-muted:     #4a5a7a;
+  --text-inverse:   #0e1117;
+
+  --accent:         #4d8ef0;
+  --accent-hover:   #6aa3f5;
+  --accent-dim:     rgba(77, 142, 240, 0.15);
+
+  --success:        #3dba7e;
+  --warning:        #e8a840;
+  --danger:         #e85c5c;
+  --info:           #4d8ef0;
+
+  --node-bg:        #1a2235;
+  --node-border:    #2a3f60;
+  --node-selected:  #4d8ef0;
+  --node-shadow:    rgba(0, 0, 0, 0.5);
+
+  --edge-color:     #4d8ef0;
+  --edge-hover:     #6aa3f5;
+  --grid-color:     rgba(255, 255, 255, 0.03);
+
+  --scrollbar-bg:   #161b24;
+  --scrollbar-thumb: #2a3448;
+}
+
+/* ── Soft Dark Theme ── */
+[data-theme="soft-dark"] {
+  --bg-base:        #1a1e2e;
+  --bg-surface:     #222840;
+  --bg-elevated:    #2a3150;
+  --bg-hover:       #323a5c;
+  --bg-active:      #3b4468;
+
+  --border:         #333d5e;
+  --border-strong:  #4a5680;
+
+  --text-primary:   #dce4f5;
+  --text-secondary: #8494c0;
+  --text-muted:     #505e88;
+  --text-inverse:   #1a1e2e;
+
+  --accent:         #7b9fff;
+  --accent-hover:   #a0baff;
+  --accent-dim:     rgba(123, 159, 255, 0.15);
+
+  --success:        #5ecb94;
+  --warning:        #f0bc5e;
+  --danger:         #f07878;
+  --info:           #7b9fff;
+
+  --node-bg:        #222840;
+  --node-border:    #3a4870;
+  --node-selected:  #7b9fff;
+  --node-shadow:    rgba(0, 0, 0, 0.4);
+
+  --edge-color:     #7b9fff;
+  --edge-hover:     #a0baff;
+  --grid-color:     rgba(255, 255, 255, 0.04);
+
+  --scrollbar-bg:   #222840;
+  --scrollbar-thumb: #333d5e;
+}
+
+/* ── Light Theme ── */
+[data-theme="light"] {
+  --bg-base:        #f0f4fc;
+  --bg-surface:     #ffffff;
+  --bg-elevated:    #f8faff;
+  --bg-hover:       #edf1fb;
+  --bg-active:      #dde5f8;
+
+  --border:         #d0d9ef;
+  --border-strong:  #a8b8df;
+
+  --text-primary:   #1a2240;
+  --text-secondary: #4a5c80;
+  --text-muted:     #8a9cbf;
+  --text-inverse:   #ffffff;
+
+  --accent:         #2c6ee8;
+  --accent-hover:   #1a5cd4;
+  --accent-dim:     rgba(44, 110, 232, 0.1);
+
+  --success:        #1a8f5a;
+  --warning:        #c47c00;
+  --danger:         #c43030;
+  --info:           #2c6ee8;
+
+  --node-bg:        #ffffff;
+  --node-border:    #c0cce8;
+  --node-selected:  #2c6ee8;
+  --node-shadow:    rgba(0, 0, 0, 0.12);
+
+  --edge-color:     #2c6ee8;
+  --edge-hover:     #1a5cd4;
+  --grid-color:     rgba(0, 0, 0, 0.04);
+
+  --scrollbar-bg:   #f0f4fc;
+  --scrollbar-thumb: #c0cce8;
+}
+
+/* ── Scrollbars ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--scrollbar-bg); }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+/* ── Utility classes ── */
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0,0,0,0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.flex { display: flex; }
+.flex-col { display: flex; flex-direction: column; }
+.items-center { align-items: center; }
+.justify-between { justify-content: space-between; }
+.gap-1 { gap: 4px; }
+.gap-2 { gap: 8px; }
+.gap-3 { gap: 12px; }
+.flex-1 { flex: 1; }
+.min-w-0 { min-width: 0; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
