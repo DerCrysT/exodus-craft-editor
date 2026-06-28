@@ -164,7 +164,7 @@ export function initToolbar(): void {
       btn.textContent = "⇤";
       btn.title = "Eigenschaften-Panel öffnen";
     } else {
-      panel.style.display = "";
+      panel.style.display = "flex";
       appEl.style.gridTemplateColumns = "260px 1fr 280px";
       btn.textContent = "⇥";
       btn.title = "Eigenschaften-Panel einklappen";

@@ -295,17 +295,7 @@ function openAuthModal(): void {
 
 // ── Bar container ──────────────────────────────────────────
 function getOrCreateBar(): HTMLElement {
-  const el = document.getElementById("presence-bar");
-  if (!el) {
-    // Fallback - should never happen with new HTML structure
-    const div = document.createElement("div");
-    div.id = "presence-bar";
-    document.getElementById("toolbar")?.insertAdjacentElement("afterend", div);
-    return div;
-  }
-  // Activate the presence row in the grid when Firebase is enabled
-  document.getElementById("app")?.classList.add("has-presence");
-  return el;
+  return document.getElementById("presence-bar") ?? document.body;
 }
 
 function esc(s: string): string {
