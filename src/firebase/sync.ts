@@ -114,7 +114,12 @@ async function resubscribeWorkspace(): Promise<void> {
       receivingFromFirebase = true;
       store.loadProject(remote);
       receivingFromFirebase = false;
-      showToast("Canvas von Teammate aktualisiert", "info");
+      // Quiet statusbar notification instead of loud toast
+      const el = document.getElementById("save-status");
+      if (el) {
+        el.textContent = "↓ Teammate-Update";
+        setTimeout(() => { if (el) el.textContent = "Gespeichert"; }, 3000);
+      }
     }
   });
 }

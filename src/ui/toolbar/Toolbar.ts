@@ -151,6 +151,57 @@ export function initToolbar(): void {
     document.getElementById("tb-export")!.dispatchEvent(new MouseEvent("click"));
   });
 
+  // ── Props panel collapse ──
+  let propsPanelCollapsed = false;
+  document.getElementById("props-collapse-btn")?.addEventListener("click", () => {
+    propsPanelCollapsed = !propsPanelCollapsed;
+    const panel   = document.getElementById("props-panel")!;
+    const appEl   = document.getElementById("app")!;
+    const btn     = document.getElementById("props-collapse-btn")!;
+    if (propsPanelCollapsed) {
+      panel.style.width    = "0";
+      panel.style.overflow = "hidden";
+      panel.style.minWidth = "0";
+      appEl.style.gridTemplateColumns = "260px 1fr 0px";
+      btn.textContent = "⇤";
+    } else {
+      panel.style.width    = "";
+      panel.style.overflow = "";
+      panel.style.minWidth = "";
+      appEl.style.gridTemplateColumns = "260px 1fr 280px";
+      btn.textContent = "⇥";
+    }
+  });
+
+  // ── JSON Vollbild ──
+  document.getElementById("json-fullscreen")?.addEventListener("click", () => {
+    const json = store.exportJSON();
+    const overlay = document.createElement("div");
+    overlay.style.cssText = `position:fixed;inset:0;z-index:9999;
+      background:var(--bg-base);display:flex;flex-direction:column;`;
+    overlay.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;padding:10px 16px;
+        border-bottom:1px solid var(--border);background:var(--bg-surface);">
+        <span style="font-size:13px;font-weight:600;flex:1;">JSON — ${
+          store.getJSON().WorkbenchesClassnames[0] ?? "export"
+        }</span>
+        <button id="jf-copy" class="btn btn-secondary btn-sm">Kopieren</button>
+        <button id="jf-export" class="btn btn-primary btn-sm">Exportieren</button>
+        <button id="jf-close" class="btn btn-ghost btn-sm">✕ Schließen</button>
+      </div>
+      <pre style="flex:1;overflow:auto;padding:20px;font-size:12px;
+        color:var(--text-secondary);white-space:pre;font-family:monospace;
+        line-height:1.6;">${json.replace(/</g,"&lt;")}</pre>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector("#jf-close")!.addEventListener("click", () => overlay.remove());
+    overlay.querySelector("#jf-copy")!.addEventListener("click", () => {
+      navigator.clipboard.writeText(json).then(() => showToast("Kopiert!", "success"));
+    });
+    overlay.querySelector("#jf-export")!.addEventListener("click", () => {
+      document.getElementById("tb-export")!.dispatchEvent(new MouseEvent("click"));
+    });
+  });
+
   // ── Props tabs ──
   document.querySelectorAll("#props-tabs .tab").forEach(tab => {
     tab.addEventListener("click", () => {

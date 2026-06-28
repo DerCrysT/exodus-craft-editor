@@ -219,9 +219,13 @@
 
     <!-- ── Properties Panel ── -->
     <aside id="props-panel">
-      <div class="tabs" id="props-tabs">
+      <div class="tabs" id="props-tabs" style="display:flex;align-items:center;">
         <div class="tab active" data-tab="properties">Eigenschaften</div>
-        <div class="tab" data-tab="json">JSON Preview</div>
+        <div class="tab" data-tab="json">JSON</div>
+        <div style="flex:1;"></div>
+        <button id="props-collapse-btn" title="Panel ein-/ausklappen"
+          style="padding:4px 8px;background:none;border:none;cursor:pointer;
+          color:var(--text-muted);font-size:14px;flex-shrink:0;">⇥</button>
       </div>
       <div id="props-content" style="flex:1;overflow:hidden;display:flex;flex-direction:column;">
         <!-- Properties tab -->
@@ -241,6 +245,7 @@
           </div>
           <div style="padding:8px;border-top:1px solid var(--border);display:flex;gap:6px;">
             <button class="btn btn-secondary btn-sm" id="json-copy">Kopieren</button>
+            <button class="btn btn-secondary btn-sm" id="json-fullscreen">⛶ Vollbild</button>
             <button class="btn btn-primary btn-sm" id="json-export-btn">Exportieren</button>
           </div>
         </div>

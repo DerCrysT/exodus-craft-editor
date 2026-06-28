@@ -5,17 +5,28 @@ import {
 } from "../../firebase/service";
 import { bus } from "../../state/EventEmitter";
 import { store } from "../../state/AppStore";
+import { renderTeammateCursors } from "../node-editor/NodeEditor";
 
 // ── Init ───────────────────────────────────────────────────
 export function initPresenceBar(): void {
   if (!isEnabled()) { renderOfflineBar(); return; }
 
   bus.on("firebase:auth",     () => renderPresenceBar());
-  bus.on("firebase:presence", () => { renderPresenceBar(); renderCursors(); });
-  bus.on("workspace:change",  () => { syncPresence(); renderCursors(); });
+  bus.on("firebase:presence", () => { renderPresenceBar(); doRenderCursors(); });
+  bus.on("workspace:change",  () => { syncPresence(); doRenderCursors(); });
   bus.on("state:change",      () => syncPresence());
 
   renderPresenceBar();
+}
+
+function doRenderCursors(): void {
+  const fb = getFirebaseState();
+  if (!fb.user) return;
+  renderTeammateCursors(
+    fb.users as Map<string, PresenceUser>,
+    fb.user.uid,
+    store.currentWorkspaceKey(),
+  );
 }
 
 function syncPresence(): void {
@@ -29,53 +40,6 @@ function syncPresence(): void {
 }
 
 // ── Cursor overlays ────────────────────────────────────────
-function renderCursors(): void {
-  const root = document.getElementById("node-editor-root");
-  if (!root) return;
-
-  // Remove stale cursors
-  root.querySelectorAll(".teammate-cursor").forEach(el => el.remove());
-
-  const fb  = getFirebaseState();
-  if (!fb.user) return;
-  const wsKey = store.currentWorkspaceKey();
-  const canvas = store.getState().project.canvas;
-
-  fb.users.forEach(u => {
-    if (u.uid === fb.user!.uid) return;          // skip self
-    if (u.workspaceKey !== wsKey) return;         // skip other workspaces
-    if (!u.cursorX && !u.cursorY) return;         // no cursor yet
-
-    // Convert canvas → screen coordinates
-    const sx = u.cursorX * canvas.zoom + canvas.offsetX;
-    const sy = u.cursorY * canvas.zoom + canvas.offsetY;
-
-    const cursor = document.createElement("div");
-    cursor.className = "teammate-cursor";
-    cursor.style.cssText = `
-      position:absolute;
-      left:${sx}px;top:${sy}px;
-      pointer-events:none;
-      z-index:1000;
-      transform:translate(0,-2px);
-      transition:left 0.2s ease, top 0.2s ease;
-    `;
-    cursor.innerHTML = `
-      <svg width="18" height="22" viewBox="0 0 18 22" fill="none">
-        <path d="M0 0 L0 16 L4 12 L7 19 L9 18 L6 11 L11 11 Z"
-          fill="${u.color}" stroke="white" stroke-width="1"/>
-      </svg>
-      <div style="
-        position:absolute;left:14px;top:12px;
-        background:${u.color};color:white;
-        font-size:10px;font-weight:600;padding:1px 5px;
-        border-radius:3px;white-space:nowrap;
-        box-shadow:0 1px 4px rgba(0,0,0,0.3);
-      ">${esc(u.displayName.split(" ")[0])}</div>
-    `;
-    root.appendChild(cursor);
-  });
-}
 
 // ── Offline bar ────────────────────────────────────────────
 function renderOfflineBar(): void {
@@ -96,25 +60,33 @@ function renderPresenceBar(): void {
   const wsKey   = store.currentWorkspaceKey();
   const others  = all.filter(u => u.workspaceKey === wsKey && u.uid !== fb.user!.uid);
 
-  const avatars = all.map(u => {
+  // User list — show all with workspace badge
+  const avatarList = all.map(u => {
     const isMe   = u.uid === fb.user!.uid;
     const sameWs = u.workspaceKey === wsKey;
     const init   = (u.displayName || u.email || "?").slice(0,2).toUpperCase();
     const wsLabel = formatWsLabel(u.workspaceKey);
+    const firstName = (u.displayName || u.email || "?").split(" ")[0];
     return `
-      <div class="presence-avatar" title="${esc(u.displayName)} — ${esc(wsLabel)}${isMe?" (Du)":""}"
-        style="position:relative;flex-shrink:0;">
+      <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;"
+        title="${esc(u.displayName)} — ${esc(wsLabel)}${isMe?" (Du)":""}">
         ${u.photoURL
-          ? `<img src="${esc(u.photoURL)}" style="width:24px;height:24px;border-radius:50%;
-              border:2px solid ${u.color};object-fit:cover;opacity:${sameWs?1:0.4};"/>`
-          : `<div style="width:24px;height:24px;border-radius:50%;background:${u.color};
+          ? `<img src="${esc(u.photoURL)}" style="width:22px;height:22px;border-radius:50%;
+              border:2px solid ${u.color};object-fit:cover;opacity:${sameWs?1:0.5};"/>`
+          : `<div style="width:22px;height:22px;border-radius:50%;background:${u.color};
               display:flex;align-items:center;justify-content:center;font-size:9px;
-              font-weight:700;color:white;opacity:${sameWs?1:0.4};">${init}</div>`}
-        <div style="position:absolute;bottom:-1px;right:-1px;width:7px;height:7px;
-          border-radius:50%;background:${sameWs?"var(--success)":"var(--text-muted)"};
-          border:1px solid var(--bg-surface);"></div>
+              font-weight:700;color:white;opacity:${sameWs?1:0.5};">${init}</div>`}
+        <span style="font-size:10px;color:${sameWs?"var(--text-primary)":"var(--text-muted)"};
+          white-space:nowrap;max-width:60px;overflow:hidden;text-overflow:ellipsis;">
+          ${esc(firstName)}
+        </span>
+        <span style="font-size:9px;padding:1px 4px;border-radius:3px;
+          background:${sameWs?"var(--accent-dim)":"var(--bg-hover)"};
+          color:${sameWs?"var(--accent)":"var(--text-muted)"};white-space:nowrap;">
+          ${esc(wsLabel)}
+        </span>
       </div>`;
-  }).join("");
+  }).join(`<span style="color:var(--border);font-size:12px;">│</span>`);
 
   const warn = others.length > 0
     ? `<span style="font-size:10px;color:var(--warning);white-space:nowrap;flex-shrink:0;">
@@ -125,21 +97,13 @@ function renderPresenceBar(): void {
   const wsLabel = formatWsLabel(wsKey);
 
   bar.innerHTML = `
-    <div style="display:flex;align-items:center;gap:8px;padding:0 14px;height:100%;min-width:0;">
-      <div style="display:flex;gap:3px;align-items:center;flex-shrink:0;">${avatars}</div>
-      <div style="min-width:0;flex-shrink:0;">
-        <div style="font-size:11px;font-weight:600;color:var(--text-primary);
-          white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px;">
-          ${esc(fb.user.displayName ?? fb.user.email ?? "User")}
-        </div>
-        <div style="font-size:10px;color:var(--text-muted);">${all.length} online · ${esc(wsLabel)}</div>
-      </div>
-      ${warn}
+    <div style="display:flex;align-items:center;gap:8px;padding:0 14px;height:100%;min-width:0;overflow-x:auto;">
+      <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;">${avatarList}</div>
       <div style="flex:1;"></div>
-      <div id="autosync-indicator" style="font-size:10px;color:var(--text-muted);
-        display:flex;align-items:center;gap:4px;flex-shrink:0;">
+      ${warn}
+      <div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">
         <div id="sync-dot" style="width:6px;height:6px;border-radius:50%;background:var(--success);"></div>
-        <span id="sync-label">Synced</span>
+        <span id="sync-label" style="font-size:10px;color:var(--text-muted);white-space:nowrap;">Synced</span>
       </div>
       <button id="pb-signout" style="font-size:10px;padding:2px 8px;border-radius:4px;
         border:1px solid var(--border);background:transparent;color:var(--text-muted);

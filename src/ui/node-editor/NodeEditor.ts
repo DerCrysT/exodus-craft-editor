@@ -915,47 +915,45 @@ function showNodeTooltip(id: NodeId, anchor: HTMLElement): void {
   tip.style.cssText = `
     position:absolute;z-index:500;
     background:var(--bg-elevated);border:1px solid var(--accent);
-    border-radius:8px;padding:10px 12px;min-width:200px;max-width:280px;
-    box-shadow:0 8px 24px rgba(0,0,0,0.5);pointer-events:none;
-    animation:fadeIn 0.15s ease;
+    border-radius:10px;padding:0;min-width:220px;max-width:320px;
+    box-shadow:0 8px 32px rgba(0,0,0,0.6);pointer-events:none;
+    animation:fadeIn 0.15s ease;overflow:hidden;
   `;
 
   const tools = (node.attachmentsNeed ?? []).map(t => {
     const tb = t.replace("Exodus_WB_Tool_", "");
-    return `<span style="font-size:10px;padding:1px 5px;border-radius:3px;
+    return `<span style="font-size:10px;padding:1px 6px;border-radius:3px;
       background:var(--bg-hover);color:var(--text-secondary);">${tb}</span>`;
   }).join(" ");
 
   tip.innerHTML = `
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
-      ${node.imageUrl
-        ? `<img src="${node.imageUrl}" style="width:40px;height:40px;object-fit:contain;
-            border-radius:4px;background:var(--bg-base);flex-shrink:0;" />`
-        : `<div style="width:40px;height:40px;display:flex;align-items:center;
-            justify-content:center;background:var(--bg-base);border-radius:4px;
-            font-size:20px;flex-shrink:0;">📦</div>`}
-      <div>
-        <div style="font-size:13px;font-weight:700;color:var(--text-primary);">${esc(node.classname)}</div>
-        ${node.recipeName ? `<div style="font-size:11px;color:var(--text-muted);">${esc(node.recipeName)}</div>` : ""}
+    ${node.imageUrl ? `
+      <div style="width:100%;background:var(--bg-base);border-bottom:1px solid var(--border);
+        display:flex;align-items:center;justify-content:center;padding:16px;">
+        <img src="${node.imageUrl}" style="max-width:200px;max-height:200px;
+          object-fit:contain;border-radius:4px;" />
+      </div>` : ""}
+    <div style="padding:10px 12px;">
+      <div style="font-size:13px;font-weight:700;color:var(--text-primary);margin-bottom:2px;">
+        ${esc(node.classname)}
       </div>
+      ${node.recipeName ? `<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">${esc(node.recipeName)}</div>` : ""}
+      ${node.category ? `<div style="font-size:11px;margin-bottom:4px;">
+        <span style="color:var(--text-muted);">Kategorie:</span>
+        <strong style="color:var(--text-primary);margin-left:4px;">${esc(node.category)}</strong>
+      </div>` : ""}
+      <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:${tools ? "6px" : "0"};">
+        <span style="font-size:11px;padding:2px 6px;border-radius:4px;
+          background:rgba(61,186,126,0.15);color:var(--success);">
+          ${node.craftType ?? "craft"}
+        </span>
+        <span style="font-size:11px;padding:2px 6px;border-radius:4px;
+          background:var(--accent-dim);color:var(--accent);">
+          ×${node.resultCount ?? 1}
+        </span>
+      </div>
+      ${tools ? `<div style="display:flex;gap:3px;flex-wrap:wrap;">${tools}</div>` : ""}
     </div>
-    ${node.category ? `<div style="font-size:11px;margin-bottom:4px;">
-      <span style="color:var(--text-muted);">Kategorie:</span>
-      <strong style="color:var(--text-primary);">${esc(node.category)}</strong>
-    </div>` : ""}
-    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px;">
-      <span style="font-size:11px;padding:2px 6px;border-radius:4px;
-        background:rgba(61,186,126,0.15);color:var(--success);">
-        ${node.craftType ?? "craft"}
-      </span>
-      <span style="font-size:11px;padding:2px 6px;border-radius:4px;
-        background:var(--accent-dim);color:var(--accent);">
-        ×${node.resultCount ?? 1} Ergebnis${(node.resultCount ?? 1) !== 1 ? "se" : ""}
-      </span>
-    </div>
-    ${tools ? `<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:4px;">${tools}</div>` : ""}
-    <div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border);
-      font-size:10px;color:var(--text-muted);">Doppelklick für Eigenschaften · ⚙ Button</div>
   `;
 
   // Position: right of node in screen space
@@ -1707,7 +1705,58 @@ function showContextMenu(mx: number, my: number, nodeId: NodeId | null): void {
   if (r.bottom > window.innerHeight) menu.style.top  = `${my - r.height}px`;
 }
 
-// ── Minimap ────────────────────────────────────────────────
+// ── Teammate Cursors ───────────────────────────────────────
+// Rendered inside node-editor-root, using live canvas transform
+let cursorOverlay: HTMLElement | null = null;
+
+export function renderTeammateCursors(
+  users: Map<string, { uid: string; displayName: string; color: string;
+    workspaceKey: string; cursorX: number; cursorY: number }>,
+  currentUid: string,
+  currentWsKey: string,
+): void {
+  if (!cursorOverlay) {
+    cursorOverlay = document.createElement("div");
+    cursorOverlay.id = "cursor-overlay";
+    cursorOverlay.style.cssText =
+      "position:absolute;inset:0;pointer-events:none;z-index:200;overflow:visible;";
+    root?.appendChild(cursorOverlay);
+  }
+
+  // Clear old cursors
+  cursorOverlay.innerHTML = "";
+
+  users.forEach(u => {
+    if (u.uid === currentUid) return;
+    if (u.workspaceKey !== currentWsKey) return;
+    if (!u.cursorX && !u.cursorY) return;
+
+    // Canvas → screen coords using live ox/oy/zoom
+    const sx = u.cursorX * zoom + ox;
+    const sy = u.cursorY * zoom + oy;
+
+    const el = document.createElement("div");
+    el.style.cssText = `
+      position:absolute;left:${sx}px;top:${sy}px;
+      pointer-events:none;user-select:none;
+      transition:left 0.15s ease,top 0.15s ease;
+      transform-origin:0 0;
+    `;
+    const firstName = (u.displayName || "?").split(" ")[0];
+    el.innerHTML = `
+      <svg width="16" height="20" viewBox="0 0 16 20" style="display:block;">
+        <path d="M0 0 L0 14 L4 10 L6 17 L8 16 L6 9 L10 9 Z"
+          fill="${u.color}" stroke="white" stroke-width="1.2"/>
+      </svg>
+      <div style="position:absolute;left:13px;top:10px;
+        background:${u.color};color:white;font-size:10px;font-weight:600;
+        padding:1px 5px;border-radius:3px;white-space:nowrap;
+        box-shadow:0 1px 3px rgba(0,0,0,0.4);">
+        ${esc(firstName)}
+      </div>`;
+    cursorOverlay?.appendChild(el);
+  });
+}
 function renderMinimap(): void {
   const mc = document.getElementById("minimap") as HTMLCanvasElement;
   if (!mc) return;
