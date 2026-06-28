@@ -48,7 +48,7 @@ export type WorkbenchType =
   | "Wissenschaft";
 
 export type Faction =
-  | "Badnits"
+  | "Bandits"
   | "ClearSky"
   | "Digger"
   | "Duty"

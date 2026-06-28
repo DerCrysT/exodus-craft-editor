@@ -49,7 +49,7 @@ export const WORKBENCH_DEFS: WorkbenchDef[] = [
 ];
 
 export const FACTIONS: Faction[] = [
-  "Badnits",
+  "Bandits",
   "ClearSky",
   "Digger",
   "Duty",

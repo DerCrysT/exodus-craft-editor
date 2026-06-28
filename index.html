@@ -50,7 +50,7 @@
       <!-- Faction -->
       <select class="tb-select" id="tb-faction" data-tooltip="Fraktion">
         <option value="">— Keine Fraktion —</option>
-        <option value="Badnits">Badnits</option>
+        <option value="Bandits">Bandits</option>
         <option value="ClearSky">ClearSky</option>
         <option value="Digger">Digger</option>
         <option value="Duty">Duty</option>
@@ -166,6 +166,12 @@
         </button>
       </div>
     </header>
+
+    <!-- ── Presence Bar ── -->
+    <div id="presence-bar" style="grid-area:presence;background:var(--bg-elevated);
+      border-bottom:1px solid var(--border);overflow:hidden;display:flex;align-items:center;">
+      <div style="padding:0 14px;font-size:11px;color:var(--text-muted);">Nicht angemeldet</div>
+    </div>
 
     <!-- ── Library Panel ── -->
     <aside id="library-panel">

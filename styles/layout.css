@@ -12,14 +12,19 @@ html, body {
 /* ── App Shell ── */
 #app {
   display: grid;
-  grid-template-rows: 44px 1fr 28px;
+  grid-template-rows: 44px 0px 1fr 28px;
   grid-template-columns: 260px 1fr 280px;
   grid-template-areas:
-    "toolbar toolbar toolbar"
-    "library canvas props"
+    "toolbar   toolbar   toolbar"
+    "presence  presence  presence"
+    "library   canvas    props"
     "statusbar statusbar statusbar";
   height: 100vh;
   overflow: hidden;
+}
+
+#app.has-presence {
+  grid-template-rows: 44px 36px 1fr 28px;
 }
 
 /* ── Toolbar ── */

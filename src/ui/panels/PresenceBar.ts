@@ -16,6 +16,11 @@ export function initPresenceBar(): void {
   bus.on("workspace:change",  () => { syncPresence(); doRenderCursors(); });
   bus.on("state:change",      () => syncPresence());
 
+  // Refresh presence bar every 5 seconds to catch updates
+  setInterval(() => {
+    if (getFirebaseState().user) renderPresenceBar();
+  }, 5000);
+
   renderPresenceBar();
 }
 
@@ -290,24 +295,16 @@ function openAuthModal(): void {
 
 // ── Bar container ──────────────────────────────────────────
 function getOrCreateBar(): HTMLElement {
-  let el = document.getElementById("presence-bar");
+  const el = document.getElementById("presence-bar");
   if (!el) {
-    el = document.createElement("div");
-    el.id = "presence-bar";
-    el.style.cssText = `height:36px;background:var(--bg-elevated);
-      border-bottom:1px solid var(--border);flex-shrink:0;overflow:hidden;`;
-    const toolbar = document.getElementById("toolbar");
-    if (toolbar) {
-      toolbar.insertAdjacentElement("afterend", el);
-      const app = document.getElementById("app");
-      if (app) {
-        app.style.gridTemplateRows   = "44px 36px 1fr 28px";
-        app.style.gridTemplateAreas =
-          '"toolbar toolbar toolbar" "presence presence presence" "library canvas props" "statusbar statusbar statusbar"';
-        el.style.gridArea = "presence";
-      }
-    }
+    // Fallback - should never happen with new HTML structure
+    const div = document.createElement("div");
+    div.id = "presence-bar";
+    document.getElementById("toolbar")?.insertAdjacentElement("afterend", div);
+    return div;
   }
+  // Activate the presence row in the grid when Firebase is enabled
+  document.getElementById("app")?.classList.add("has-presence");
   return el;
 }
 
