@@ -1,150 +1,178 @@
 import { store } from "../state/AppStore";
 import { bus } from "../state/EventEmitter";
 import {
-  isEnabled, saveLibraryToFirebase, loadLibraryFromFirebase,
+  isEnabled,
+  saveLibraryToFirebase, loadLibraryFromFirebase,
   saveWorkspaceToFirebase, loadWorkspaceFromFirebase,
   subscribeWorkspace, onLibraryUpdate, getFirebaseState,
+  subscribeLibrary,
 } from "../firebase/service";
 import type { ExodusCraftProject, LibraryItem } from "../types/index";
 import { showToast } from "../ui/toolbar/Toolbar";
 
-// ── Debounce timers ────────────────────────────────────────
-let libSaveTimer:  ReturnType<typeof setTimeout> | null = null;
-let wsSaveTimer:   ReturnType<typeof setTimeout> | null = null;
+// ── State ──────────────────────────────────────────────────
+let libSaveTimer:   ReturnType<typeof setTimeout> | null = null;
+let wsSaveTimer:    ReturnType<typeof setTimeout> | null = null;
 let unsubWorkspace: (() => void) | null = null;
 
-// Prevent feedback loops: when we receive Firebase updates, don't re-save
+// Guard: don't re-save what we just received from Firebase
 let receivingFromFirebase = false;
+
+// Track last saved content to avoid redundant writes
+let lastSavedWsJson = "";
+let lastSavedLibJson = "";
 
 // ── Init ───────────────────────────────────────────────────
 export function initFirebaseSync(): void {
   if (!isEnabled()) return;
 
-  // Wait for auth before starting sync
+  // When user logs in → start full sync
   bus.on("firebase:auth", (e) => {
     const ev = e as { payload: unknown };
     if (ev.payload) {
-      // User signed in
       startSync();
     } else {
-      // User signed out
       stopSync();
     }
   });
 
-  // Library: save to Firebase whenever it changes (debounced 1s)
+  // State changed locally → schedule save to Firebase (debounced)
   bus.on("state:change", () => {
     if (receivingFromFirebase) return;
     if (!isEnabled() || !getFirebaseState().user) return;
-
-    if (libSaveTimer) clearTimeout(libSaveTimer);
-    libSaveTimer = setTimeout(() => {
-      saveLibraryToFirebase(store.getLibrary()).catch(console.error);
-    }, 1000);
+    scheduleLibrarySave();
+    scheduleWorkspaceSave();
   });
 
-  // Workspace: save to Firebase on project save or state change (debounced 2s)
   bus.on("project:save", () => {
     if (receivingFromFirebase) return;
-    scheduleSaveWorkspace();
-  });
-  bus.on("state:change", () => {
-    if (receivingFromFirebase) return;
-    scheduleSaveWorkspace();
+    scheduleWorkspaceSave();
   });
 
-  // React to workspace switches
+  // When workspace switches → re-subscribe to new workspace in Firebase
   bus.on("workspace:change", () => {
+    if (!isEnabled() || !getFirebaseState().user) return;
     resubscribeWorkspace();
   });
 }
 
-function scheduleSaveWorkspace(): void {
-  if (!isEnabled() || !getFirebaseState().user) return;
+// ── Save scheduling ────────────────────────────────────────
+function scheduleLibrarySave(): void {
+  if (libSaveTimer) clearTimeout(libSaveTimer);
+  libSaveTimer = setTimeout(async () => {
+    const lib = store.getLibrary();
+    const json = JSON.stringify(lib.map(i => i.classname)); // cheap hash
+    if (json === lastSavedLibJson) return; // nothing changed
+    lastSavedLibJson = json;
+    await saveLibraryToFirebase(lib);
+  }, 1500);
+}
+
+function scheduleWorkspaceSave(): void {
   if (wsSaveTimer) clearTimeout(wsSaveTimer);
-  wsSaveTimer = setTimeout(() => {
-    const wsKey = store.currentWorkspaceKey();
+  wsSaveTimer = setTimeout(async () => {
+    const wsKey  = store.currentWorkspaceKey();
     const project = store.getState().project;
-    saveWorkspaceToFirebase(wsKey, project).catch(console.error);
+    const json   = JSON.stringify({ nodes: project.nodes.length, edges: project.edges.length });
+    if (json === lastSavedWsJson) return; // nothing changed
+    lastSavedWsJson = json;
+    await saveWorkspaceToFirebase(wsKey, project);
   }, 2000);
 }
 
-// ── Start/stop sync ────────────────────────────────────────
+// ── Start sync after login ─────────────────────────────────
 async function startSync(): Promise<void> {
-  // 1. Load library from Firebase
-  const fbLibrary = await loadLibraryFromFirebase();
-  if (fbLibrary.length > 0) {
-    receivingFromFirebase = true;
-    store.setLibrary(fbLibrary);
-    receivingFromFirebase = false;
-    showToast("Library aus Firebase geladen", "success");
+  // 1. Load library from Firebase and apply locally
+  try {
+    const fbLib = await loadLibraryFromFirebase();
+    if (fbLib.length > 0) {
+      receivingFromFirebase = true;
+      store.setLibrary(fbLib);
+      receivingFromFirebase = false;
+    }
+  } catch (e) {
+    console.warn("Library load failed:", e);
   }
 
-  // 2. Subscribe to library updates
+  // 2. Subscribe to live library updates from other users
   onLibraryUpdate((items: LibraryItem[]) => {
+    if (receivingFromFirebase) return;
     receivingFromFirebase = true;
     store.setLibrary(items);
     receivingFromFirebase = false;
   });
 
+  // Must call subscribeLibrary AFTER setting up the callback
+  subscribeLibrary();
+
   // 3. Subscribe to current workspace
-  resubscribeWorkspace();
+  await resubscribeWorkspace();
 }
 
 function stopSync(): void {
   if (unsubWorkspace) { unsubWorkspace(); unsubWorkspace = null; }
   if (libSaveTimer)   { clearTimeout(libSaveTimer);  libSaveTimer  = null; }
   if (wsSaveTimer)    { clearTimeout(wsSaveTimer);   wsSaveTimer   = null; }
+  lastSavedWsJson  = "";
+  lastSavedLibJson = "";
 }
 
+// ── Workspace subscription ─────────────────────────────────
 async function resubscribeWorkspace(): Promise<void> {
   if (!isEnabled() || !getFirebaseState().user) return;
 
+  // Unsubscribe from previous workspace
   if (unsubWorkspace) { unsubWorkspace(); unsubWorkspace = null; }
 
   const wsKey = store.currentWorkspaceKey();
 
-  // Load current workspace from Firebase
-  const fbProject = await loadWorkspaceFromFirebase(wsKey);
-  if (fbProject) {
-    receivingFromFirebase = true;
-    store.loadProject(fbProject as ExodusCraftProject);
-    receivingFromFirebase = false;
-    showToast(`Workspace "${wsKey}" aus Firebase geladen`, "success");
+  // Load current workspace snapshot from Firebase
+  try {
+    const fbProject = await loadWorkspaceFromFirebase(wsKey);
+    if (fbProject) {
+      receivingFromFirebase = true;
+      store.loadProject(fbProject as ExodusCraftProject);
+      receivingFromFirebase = false;
+    }
+  } catch (e) {
+    console.warn("Workspace load failed:", e);
   }
 
   // Subscribe to live updates for this workspace
   unsubWorkspace = subscribeWorkspace(wsKey, (data: unknown) => {
-    if (!data) return;
-    receivingFromFirebase = true;
-    // Merge: only update if data is newer than local
+    if (!data || receivingFromFirebase) return;
+
     const remote = data as ExodusCraftProject;
     const local  = store.getState().project;
+
+    // Only apply if remote is actually newer
     const remoteTime = new Date(remote.meta?.updatedAt ?? 0).getTime();
     const localTime  = new Date(local.meta?.updatedAt  ?? 0).getTime();
-    if (remoteTime > localTime) {
+
+    if (remoteTime > localTime + 1000) { // 1s tolerance
+      receivingFromFirebase = true;
       store.loadProject(remote);
-      showToast("Workspace von anderem User aktualisiert", "info");
+      receivingFromFirebase = false;
+      showToast("Canvas von Teammate aktualisiert", "info");
     }
-    receivingFromFirebase = false;
   });
 }
 
-// ── Manual migration: localStorage → Firebase ─────────────
+// ── Manual migration: localStorage → Firebase ──────────────
 export async function migrateLocalToFirebase(): Promise<void> {
   if (!isEnabled() || !getFirebaseState().user) {
     showToast("Bitte erst anmelden", "warning");
     return;
   }
-
-  const lib = store.getLibrary();
-  if (lib.length > 0) {
-    await saveLibraryToFirebase(lib);
+  try {
+    await saveLibraryToFirebase(store.getLibrary());
+    await saveWorkspaceToFirebase(
+      store.currentWorkspaceKey(),
+      store.getState().project
+    );
+    showToast("Lokale Daten zu Firebase hochgeladen ✓", "success");
+  } catch (e) {
+    showToast("Upload fehlgeschlagen", "error");
+    console.error(e);
   }
-
-  const wsKey  = store.currentWorkspaceKey();
-  const project = store.getState().project;
-  await saveWorkspaceToFirebase(wsKey, project);
-
-  showToast("Lokale Daten zu Firebase hochgeladen ✓", "success");
 }

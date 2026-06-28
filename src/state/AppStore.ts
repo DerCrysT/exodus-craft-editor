@@ -438,13 +438,14 @@ class AppStore {
 
   saveToStorage(): void {
     try {
-      // Save to both: the active workspace key AND a global "last active" key
+      // Always update timestamp so Firebase sync can compare versions
+      this.state.project.meta.updatedAt = new Date().toISOString();
+
       const wsData = JSON.stringify(this.state.project);
       localStorage.setItem(this.workspaceStorageKey(this.currentWorkspaceKey()), wsData);
-      // Also persist the active workbench/faction so we restore correctly on reload
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        activeWorkbench: this.state.activeWorkbench,
-        activeFaction:   this.state.activeFaction,
+        activeWorkbench:    this.state.activeWorkbench,
+        activeFaction:      this.state.activeFaction,
         activeWorkspaceKey: this.currentWorkspaceKey(),
       }));
       this.state.isDirty = false;
