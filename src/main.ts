@@ -8,7 +8,7 @@ import { initAutoSync } from "./data/recipeSync";
 import { initVersioning } from "./ui/panels/Versioning";
 import { perfMonitor } from "./ui/node-editor/VirtualRenderer";
 import { initFirebase, isEnabled } from "./firebase/service";
-import { initFirebaseSync, migrateLocalToFirebase } from "./firebase/sync";
+import { initFirebaseSync, migrateLocalToFirebase, initCursorTracking } from "./firebase/sync";
 import { initPresenceBar } from "./ui/panels/PresenceBar";
 
 function bootstrap(): void {
@@ -34,9 +34,14 @@ function bootstrap(): void {
   initVersioning();
   perfMonitor.start();
 
-  // 4. Firebase sync + presence bar
+  // 4. Firebase sync + presence bar + cursor tracking
   initFirebaseSync();
   initPresenceBar();
+  // Start cursor tracking after DOM is ready
+  requestAnimationFrame(() => {
+    const canvasRoot = document.getElementById("node-editor-root");
+    if (canvasRoot) initCursorTracking(canvasRoot);
+  });
 
   // 5. Migrate button (only shown when Firebase is enabled and user is logged in)
   const migrateBtn = document.getElementById("tb-migrate-firebase");
