@@ -155,21 +155,19 @@ export function initToolbar(): void {
   let propsPanelCollapsed = false;
   document.getElementById("props-collapse-btn")?.addEventListener("click", () => {
     propsPanelCollapsed = !propsPanelCollapsed;
-    const panel   = document.getElementById("props-panel")!;
-    const appEl   = document.getElementById("app")!;
-    const btn     = document.getElementById("props-collapse-btn")!;
+    const panel   = document.getElementById("props-panel") as HTMLElement;
+    const appEl   = document.getElementById("app") as HTMLElement;
+    const btn     = document.getElementById("props-collapse-btn") as HTMLElement;
     if (propsPanelCollapsed) {
-      panel.style.width    = "0";
-      panel.style.overflow = "hidden";
-      panel.style.minWidth = "0";
+      panel.style.display  = "none";
       appEl.style.gridTemplateColumns = "260px 1fr 0px";
-      btn.textContent = "⇤";
+      btn.textContent  = "⇤";
+      btn.title        = "Eigenschaften-Panel öffnen";
     } else {
-      panel.style.width    = "";
-      panel.style.overflow = "";
-      panel.style.minWidth = "";
+      panel.style.display  = "";
       appEl.style.gridTemplateColumns = "260px 1fr 280px";
-      btn.textContent = "⇥";
+      btn.textContent  = "⇥";
+      btn.title        = "Eigenschaften-Panel einklappen";
     }
   });
 

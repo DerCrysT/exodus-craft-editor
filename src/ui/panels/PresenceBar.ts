@@ -56,9 +56,23 @@ function renderPresenceBar(): void {
 
   if (!fb.user) { renderLoginBar(bar); return; }
 
-  const all     = [...fb.users.values()];
+  // Always include current user even if Firebase presence map not yet populated
   const wsKey   = store.currentWorkspaceKey();
-  const others  = all.filter(u => u.workspaceKey === wsKey && u.uid !== fb.user!.uid);
+  const selfEntry = {
+    uid:          fb.user.uid,
+    displayName:  fb.user.displayName ?? fb.user.email ?? "Du",
+    email:        fb.user.email ?? "",
+    photoURL:     fb.user.photoURL ?? "",
+    workspaceKey: wsKey,
+    color:        "#4d8ef0",
+    cursorX:      0, cursorY: 0,
+    workbench:    null, faction: null, lastSeen: Date.now(),
+  };
+  // Merge: Firebase users map, fallback to self-only
+  const allMap = new Map(fb.users);
+  if (!allMap.has(fb.user.uid)) allMap.set(fb.user.uid, selfEntry as PresenceUser);
+  const all    = [...allMap.values()];
+  const others = all.filter(u => u.workspaceKey === wsKey && u.uid !== fb.user!.uid);
 
   // User list — show all with workspace badge
   const avatarList = all.map(u => {

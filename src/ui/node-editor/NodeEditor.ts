@@ -107,11 +107,10 @@ function applyTransform(): void {
   edgesGroup.setAttribute("transform", `translate(${ox},${oy}) scale(${zoom})`);
   setZoomDisplay(zoom);
   store.setCanvas({ offsetX: ox, offsetY: oy, zoom });
-  // Virtual culling — only for large graphs
   virtualRenderer.update(root.getBoundingClientRect());
   virtualRenderer.applyVisibility(store.getNodes(), ox, oy, zoom);
-  // Reposition HTML edge labels to match new pan/zoom
   renderEdges();
+  bus.emit("firebase:presence"); // re-render cursors with new transform
   renderMinimap();
 }
 
