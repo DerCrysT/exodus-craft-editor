@@ -52,7 +52,15 @@ export function initFormEditor(): void {
   document.getElementById("fe-collapse-all")!.addEventListener("click", () => { expandedItems.clear(); render(); });
   document.getElementById("fe-bulk-delete")!.addEventListener("click", bulkDelete);
 
-  bus.on("state:change", () => render());
+  bus.on("state:change", () => {
+    // Don't re-render while user is typing in an input — would reset cursor
+    const active = document.activeElement;
+    const isTyping = active instanceof HTMLInputElement
+      || active instanceof HTMLTextAreaElement
+      || active instanceof HTMLSelectElement;
+    if (isTyping && active.closest("#form-editor-root")) return;
+    render();
+  });
   bus.on("mode:change", (e) => {
     const ev = e as { payload: string };
     if (ev.payload === "form") render();

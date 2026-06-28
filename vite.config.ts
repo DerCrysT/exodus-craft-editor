@@ -4,7 +4,7 @@ import { resolve } from "path";
 export default defineConfig({
   // Change base to your GitHub repo name for Pages deployment
   // e.g. base: "/exodus-craft-editor/"
-  base: "/exodus-craft-editor/",
+  base: "./",
   build: {
     outDir: "dist",
     sourcemap: true,

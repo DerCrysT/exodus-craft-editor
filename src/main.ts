@@ -7,6 +7,9 @@ import { initFormEditor } from "./ui/form-editor/FormEditor";
 import { initAutoSync } from "./data/recipeSync";
 import { initVersioning } from "./ui/panels/Versioning";
 import { perfMonitor } from "./ui/node-editor/VirtualRenderer";
+import { initFirebase, isEnabled } from "./firebase/service";
+import { initFirebaseSync, migrateLocalToFirebase } from "./firebase/sync";
+import { initPresenceBar } from "./ui/panels/PresenceBar";
 
 function bootstrap(): void {
   // 1. Theme
@@ -18,29 +21,44 @@ function bootstrap(): void {
     localStorage.setItem("exodus_craft_theme", (e.target as HTMLSelectElement).value);
   });
 
-  // 2. Init subsystems
+  // 2. Firebase (must be before other inits so auth state is ready)
+  initFirebase();
+
+  // 3. Init subsystems
   initAutoSync();
   initToolbar();
   initLibraryPanel();
   initNodeEditor();
   initPropertiesPanel();
   initFormEditor();
-  initVersioning();       // auto restore-point every 5 min
-  perfMonitor.start();    // FPS monitor (toggle: Ctrl+Shift+P)
+  initVersioning();
+  perfMonitor.start();
 
-  // 3. Load persisted data — library is loaded inside loadFromStorage
+  // 4. Firebase sync + presence bar
+  initFirebaseSync();
+  initPresenceBar();
+
+  // 5. Migrate button (only shown when Firebase is enabled and user is logged in)
+  const migrateBtn = document.getElementById("tb-migrate-firebase");
+  if (migrateBtn) {
+    if (isEnabled()) {
+      migrateBtn.style.display = "";
+      migrateBtn.addEventListener("click", () => migrateLocalToFirebase());
+    }
+  }
+
+  // 6. Load persisted data (localStorage fallback when Firebase offline/not configured)
   const loaded = store.loadFromStorage();
 
   // Sync toolbar dropdowns to restored state
   const wbSel = document.getElementById("tb-workbench") as HTMLSelectElement;
   const faSel = document.getElementById("tb-faction")   as HTMLSelectElement;
-  const state = store.getState();
-  if (wbSel && state.activeWorkbench) wbSel.value = state.activeWorkbench;
-  if (faSel) faSel.value = state.activeFaction ?? "";
+  const appState = store.getState();
+  if (wbSel && appState.activeWorkbench) wbSel.value = appState.activeWorkbench;
+  if (faSel) faSel.value = appState.activeFaction ?? "";
 
-  // 4. Only seed defaults when nothing exists in storage at all
+  // 7. Seed example data on first launch
   if (!loaded) {
-    // Seed example JSON
     store.setJSON({
       WorkbenchesClassnames: ["Exodus_WB_Kleidung"],
       CraftCategories: [
@@ -68,7 +86,6 @@ function bootstrap(): void {
       ],
       m_CustomizationSetting: { PathToMainBackgroundImg: "", PathToCraftImg: "" },
     });
-    // Seed library only if also empty (first ever launch)
     if (store.getLibrary().length === 0) {
       seedLibraryDefaults();
     }

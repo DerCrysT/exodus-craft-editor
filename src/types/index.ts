@@ -207,6 +207,9 @@ export type AppEventType =
   | "validation:run"
   | "workspace:change"
   | "json:formUpdate"
+  | "firebase:auth"
+  | "firebase:presence"
+  | "firebase:library"
   | "undo"
   | "redo";
 
