@@ -47,7 +47,10 @@ export function initToolbar(): void {
     refreshWorkbenchClassname();
     updateModeButtons(store.getState().activeMode);
   });
-  // Re-apply mode UI whenever mode:change fires (e.g. after workspace switch)
+  // Set initial mode UI (form-editor-root starts hidden, node-editor-root visible)
+  updateModeButtons(store.getState().activeMode);
+
+  // Keep mode UI in sync whenever mode:change fires (e.g. after workspace switch)
   bus.on("mode:change", (e) => {
     const ev = e as { payload: string };
     if (ev.payload === "node" || ev.payload === "form") {

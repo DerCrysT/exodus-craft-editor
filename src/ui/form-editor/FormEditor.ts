@@ -38,8 +38,8 @@ export function initFormEditor(): void {
     <div id="fe-body" style="flex:1;overflow-y:auto;padding:12px 16px;"></div>
   `;
 
-  root.style.display = "flex";
   root.style.flexDirection = "column";
+  // display is controlled by updateModeButtons — don't set it here
 
   document.getElementById("fe-search")!.addEventListener("input", (e) => {
     searchText = (e.target as HTMLInputElement).value.toLowerCase();
