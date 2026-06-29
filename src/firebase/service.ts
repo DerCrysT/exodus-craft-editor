@@ -69,8 +69,13 @@ export function initFirebase(): void {
     onAuthStateChanged(auth, user => {
       state.user = user;
       bus.emit("firebase:auth", user);
-      if (user) { setupPresence(user); subscribeLibrary(); }
-      else       { cleanupPresence(); }
+      if (user) {
+        setupPresence(user);
+        // NOTE: subscribeLibrary() is called by sync.ts startSync() — not here
+        // Calling it here too would cause double-subscription
+      } else {
+        cleanupPresence();
+      }
     });
 
     state.initialized = true;

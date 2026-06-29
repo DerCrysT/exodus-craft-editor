@@ -4,6 +4,58 @@ import type { CraftItem, CraftCategory, CraftComponent } from "../../types/index
 import { showToast } from "../toolbar/Toolbar";
 import { WORKBENCH_DEFS } from "../../data/workbenches";
 
+// ── Modal helpers (no browser prompt/confirm) ─────────────
+function showPrompt(message: string, defaultVal = ""): Promise<string | null> {
+  return new Promise(resolve => {
+    const overlay = document.createElement("div");
+    overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;";
+    overlay.innerHTML = `
+      <div style="background:var(--bg-surface);border:1px solid var(--accent);border-radius:8px;
+        padding:20px;min-width:320px;box-shadow:0 8px 32px rgba(0,0,0,0.5);">
+        <div style="font-size:13px;font-weight:600;color:var(--text-primary);margin-bottom:12px;">${message}</div>
+        <input id="modal-input" class="field-input" style="width:100%;margin-bottom:12px;" value="${defaultVal.replace(/"/g,'&quot;')}" />
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button id="modal-cancel" class="btn btn-ghost btn-sm">Abbrechen</button>
+          <button id="modal-ok" class="btn btn-primary btn-sm">OK</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const input = overlay.querySelector<HTMLInputElement>("#modal-input")!;
+    const ok = () => { const v = input.value.trim(); overlay.remove(); resolve(v || null); };
+    const cancel = () => { overlay.remove(); resolve(null); };
+    overlay.querySelector("#modal-ok")!.addEventListener("click", ok);
+    overlay.querySelector("#modal-cancel")!.addEventListener("click", cancel);
+    input.addEventListener("keydown", e => { if (e.key === "Enter") ok(); if (e.key === "Escape") cancel(); });
+    setTimeout(() => { input.focus(); input.select(); }, 30);
+  });
+}
+
+function showConfirm(message: string): Promise<boolean> {
+  return new Promise(resolve => {
+    const overlay = document.createElement("div");
+    overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;";
+    overlay.innerHTML = `
+      <div style="background:var(--bg-surface);border:1px solid var(--border);border-radius:8px;
+        padding:20px;min-width:300px;box-shadow:0 8px 32px rgba(0,0,0,0.5);">
+        <div style="font-size:13px;color:var(--text-primary);margin-bottom:16px;">${message}</div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button id="modal-cancel" class="btn btn-ghost btn-sm">Abbrechen</button>
+          <button id="modal-ok" class="btn btn-danger btn-sm">Löschen</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const ok = () => { overlay.remove(); resolve(true); };
+    const cancel = () => { overlay.remove(); resolve(false); };
+    overlay.querySelector("#modal-ok")!.addEventListener("click", ok);
+    overlay.querySelector("#modal-cancel")!.addEventListener("click", cancel);
+    overlay.addEventListener("keydown", (e: KeyboardEvent) => { if (e.key === "Escape") cancel(); });
+    overlay.addEventListener("click", e => { if (e.target === overlay) cancel(); });
+    setTimeout(() => (overlay.querySelector("#modal-ok") as HTMLElement)?.focus(), 30);
+  });
+}
+
+
+
 // updateJSON now emits json:formUpdate internally — no extra emit needed
 function formUpdateJSON(patch: Parameters<typeof store.updateJSON>[0]): void {
   store.updateJSON(patch);
@@ -456,9 +508,9 @@ function applyComponentField(ci: number, ii: number, ki: number, field: string, 
   formUpdateJSON({ CraftCategories: json.CraftCategories });
 }
 
-function addCategory(): void {
-  const name = prompt("Kategoriename:");
-  if (!name?.trim()) return;
+async function addCategory(): Promise<void> {
+  const name = await showPrompt("Kategoriename:");
+  if (!name) return;
   const json = JSON.parse(JSON.stringify(store.getJSON()));
   const ci = json.CraftCategories.length;
   json.CraftCategories.push({ CategoryName: name.trim(), CraftItems: [] });
@@ -467,20 +519,20 @@ function addCategory(): void {
   showToast("Kategorie erstellt", "success");
 }
 
-function renameCategoryInline(ci: number): void {
+async function renameCategoryInline(ci: number): Promise<void> {
   const json = store.getJSON();
   const current = json.CraftCategories[ci]?.CategoryName ?? "";
-  const name = prompt("Neuer Name:", current);
-  if (!name?.trim() || name.trim() === current) return;
+  const name = await showPrompt("Neuer Name:", current);
+  if (!name || name === current) return;
   const newJson = JSON.parse(JSON.stringify(json));
   newJson.CraftCategories[ci].CategoryName = name.trim();
   formUpdateJSON({ CraftCategories: newJson.CraftCategories });
 }
 
-function deleteCategory(ci: number): void {
+async function deleteCategory(ci: number): Promise<void> {
   const json = store.getJSON();
   const cat = json.CraftCategories[ci];
-  if (!confirm(`Kategorie "${cat?.CategoryName}" und alle ${cat?.CraftItems.length} Rezepte löschen?`)) return;
+  if (!await showConfirm(`Kategorie "${cat?.CategoryName}" und alle ${cat?.CraftItems.length} Rezepte löschen?`)) return;
   const newJson = JSON.parse(JSON.stringify(json));
   newJson.CraftCategories.splice(ci, 1);
   formUpdateJSON({ CraftCategories: newJson.CraftCategories });
@@ -506,10 +558,10 @@ function addItem(ci: number): void {
   showToast("Rezept hinzugefügt", "success");
 }
 
-function deleteItem(ci: number, ii: number): void {
+async function deleteItem(ci: number, ii: number): Promise<void> {
   const json = store.getJSON();
   const item = json.CraftCategories[ci]?.CraftItems[ii];
-  if (!confirm(`Rezept "${item?.RecipeName || item?.Result}" löschen?`)) return;
+  if (!await showConfirm(`Rezept "${item?.RecipeName || item?.Result}" löschen?`)) return;
   const newJson = JSON.parse(JSON.stringify(json));
   newJson.CraftCategories[ci].CraftItems.splice(ii, 1);
   formUpdateJSON({ CraftCategories: newJson.CraftCategories });
@@ -554,10 +606,10 @@ function removeComponent(ci: number, ii: number, ki: number): void {
   formUpdateJSON({ CraftCategories: json.CraftCategories });
 }
 
-function moveToCategoryDialog(ci: number, ii: number): void {
+async function moveToCategoryDialog(ci: number, ii: number): Promise<void> {
   const json = store.getJSON();
   const categories = json.CraftCategories.map((c, i) => `${i}: ${c.CategoryName}`).join("\n");
-  const input = prompt(`In welche Kategorie verschieben?\n${categories}\n\nIndex eingeben:`);
+  const input = await showPrompt(`In welche Kategorie verschieben?\n${categories}\n\nIndex (0-${json.CraftCategories.length-1}) eingeben:`);
   if (input === null) return;
   const targetCi = Number(input);
   if (isNaN(targetCi) || targetCi === ci || !json.CraftCategories[targetCi]) {
@@ -571,8 +623,8 @@ function moveToCategoryDialog(ci: number, ii: number): void {
   showToast(`Verschoben nach "${json.CraftCategories[targetCi].CategoryName}"`, "success");
 }
 
-function bulkDelete(): void {
-  if (!confirm(`${selectedItems.size} Rezepte löschen?`)) return;
+async function bulkDelete(): Promise<void> {
+  if (!await showConfirm(`${selectedItems.size} Rezepte löschen?`)) return;
   const json = JSON.parse(JSON.stringify(store.getJSON()));
   // Sort descending to splice from end
   const pairs = [...selectedItems]

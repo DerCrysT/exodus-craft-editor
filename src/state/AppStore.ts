@@ -286,7 +286,7 @@ class AppStore {
 
   // ── Library ───────────────────────────────────────────────
 
-  setLibrary(items: LibraryItem[]): void {
+  setLibrary(items: LibraryItem[], skipLocalSave = false): void {
     // Clean up image keys for removed items
     const newClassnames = new Set(items.map(i => i.classname));
     this.state.library.forEach(old => {
@@ -295,7 +295,7 @@ class AppStore {
       }
     });
     this.state.library = items;
-    this.saveLibrary();
+    if (!skipLocalSave) this.saveLibrary();
     bus.emit("state:change");
   }
 

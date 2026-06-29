@@ -7,12 +7,16 @@ import {
   subscribeLibrary, updatePresence,
 } from "../firebase/service";
 import type { ExodusCraftProject, LibraryItem } from "../types/index";
-import { showToast } from "../ui/toolbar/Toolbar";
 
 // ── State ──────────────────────────────────────────────────
 let unsubWorkspace: (() => void) | null = null;
 let autoSyncTimer:  ReturnType<typeof setInterval> | null = null;
+
+// Guard: prevent feedback loops when we apply Firebase data locally
 let receivingFromFirebase = false;
+
+// Track if library subscription is already registered (avoid double-subscribe)
+let libSubscribed = false;
 
 // ── Init ───────────────────────────────────────────────────
 export function initFirebaseSync(): void {
@@ -42,12 +46,9 @@ function startAutoSync(): void {
 
 async function performSync(): Promise<void> {
   try {
-    // Save library
     await saveLibraryToFirebase(store.getLibrary());
-    // Save current workspace
-    const wsKey   = store.currentWorkspaceKey();
-    const project = store.getState().project;
-    await saveWorkspaceToFirebase(wsKey, project);
+    const wsKey = store.currentWorkspaceKey();
+    await saveWorkspaceToFirebase(wsKey, store.getState().project);
   } catch (e) {
     console.warn("Auto-sync failed:", e);
   }
@@ -55,70 +56,88 @@ async function performSync(): Promise<void> {
 
 // ── Start / stop ───────────────────────────────────────────
 async function startSync(): Promise<void> {
-  // 1. Load library
+  // 1. Load library from Firebase (one-time on login)
   try {
     const fbLib = await loadLibraryFromFirebase();
     if (fbLib.length > 0) {
       receivingFromFirebase = true;
-      store.setLibrary(fbLib);
-      receivingFromFirebase = false;
+      try { store.setLibrary(fbLib, true); }
+      finally { receivingFromFirebase = false; }
     }
   } catch (e) { console.warn("Library load failed:", e); }
 
-  // 2. Subscribe to live library updates
-  onLibraryUpdate((items: LibraryItem[]) => {
-    if (receivingFromFirebase) return;
-    receivingFromFirebase = true;
-    store.setLibrary(items);
-    receivingFromFirebase = false;
-  });
-  subscribeLibrary();
+  // 2. Subscribe to live library updates — only once, guard against double-subscribe
+  if (!libSubscribed) {
+    libSubscribed = true;
+    onLibraryUpdate((items: LibraryItem[]) => {
+      if (receivingFromFirebase) return;
+      receivingFromFirebase = true;
+      try { store.setLibrary(items, true); }
+      finally { receivingFromFirebase = false; }
+    });
+    // subscribeLibrary is called here only — service.ts onAuthStateChanged does NOT call it
+    // (it was removed from there to prevent double-subscription)
+    subscribeLibrary();
+  }
 
-  // 3. Subscribe to workspace
+  // 3. Load and subscribe to current workspace
   await resubscribeWorkspace();
 
-  // 4. Start auto-sync every 5 seconds
+  // 4. Start 5-second auto-sync
   startAutoSync();
 }
 
 function stopSync(): void {
-  if (unsubWorkspace)  { unsubWorkspace(); unsubWorkspace = null; }
-  if (autoSyncTimer)   { clearInterval(autoSyncTimer); autoSyncTimer = null; }
+  if (unsubWorkspace) { unsubWorkspace(); unsubWorkspace = null; }
+  if (autoSyncTimer)  { clearInterval(autoSyncTimer); autoSyncTimer = null; }
+  libSubscribed = false;
 }
 
 // ── Workspace subscription ─────────────────────────────────
 async function resubscribeWorkspace(): Promise<void> {
   if (!isEnabled() || !getFirebaseState().user) return;
+
+  // Unsubscribe from previous workspace listener
   if (unsubWorkspace) { unsubWorkspace(); unsubWorkspace = null; }
 
   const wsKey = store.currentWorkspaceKey();
 
-  // Load snapshot
+  // Load snapshot from Firebase — only apply if Firebase data is NEWER than local
   try {
     const fbProject = await loadWorkspaceFromFirebase(wsKey);
     if (fbProject) {
-      receivingFromFirebase = true;
-      store.loadProject(fbProject as ExodusCraftProject);
-      receivingFromFirebase = false;
+      const remote = fbProject as ExodusCraftProject;
+      const local  = store.getState().project;
+      const remoteTime = new Date(remote.meta?.updatedAt ?? 0).getTime();
+      const localTime  = new Date(local.meta?.updatedAt  ?? 0).getTime();
+      // Only overwrite local with Firebase data if Firebase is genuinely newer
+      if (remoteTime > localTime + 2000) {
+        receivingFromFirebase = true;
+        try { store.loadProject(remote); }
+        finally { receivingFromFirebase = false; }
+      }
     }
   } catch (e) { console.warn("Workspace load failed:", e); }
 
-  // Live subscription
+  // Live subscription: apply updates from other users in real-time
   unsubWorkspace = subscribeWorkspace(wsKey, (data: unknown) => {
     if (!data || receivingFromFirebase) return;
     const remote = data as ExodusCraftProject;
     const local  = store.getState().project;
     const remoteTime = new Date(remote.meta?.updatedAt ?? 0).getTime();
     const localTime  = new Date(local.meta?.updatedAt  ?? 0).getTime();
-    if (remoteTime > localTime + 1000) {
+    // Only apply if remote is at least 2 seconds newer (prevents self-echo)
+    if (remoteTime > localTime + 2000) {
       receivingFromFirebase = true;
-      store.loadProject(remote);
-      receivingFromFirebase = false;
-      // Quiet statusbar notification instead of loud toast
-      const el = document.getElementById("save-status");
-      if (el) {
-        el.textContent = "↓ Teammate-Update";
-        setTimeout(() => { if (el) el.textContent = "Gespeichert"; }, 3000);
+      try {
+        store.loadProject(remote);
+        const el = document.getElementById("save-status");
+        if (el) {
+          el.textContent = "↓ Teammate-Update";
+          setTimeout(() => { if (el) el.textContent = "Gespeichert"; }, 3000);
+        }
+      } finally {
+        receivingFromFirebase = false;
       }
     }
   });
@@ -132,15 +151,13 @@ export function initCursorTracking(canvasRoot: HTMLElement): void {
 
   canvasRoot.addEventListener("mousemove", (e: MouseEvent) => {
     if (!getFirebaseState().user) return;
-    if (cursorThrottle) return; // throttle to ~5 updates/sec
-
+    if (cursorThrottle) return;
     cursorThrottle = setTimeout(() => { cursorThrottle = null; }, 200);
 
     const rect = canvasRoot.getBoundingClientRect();
     const s    = store.getState().project.canvas;
-    // Convert screen → canvas coordinates
-    const cx = (e.clientX - rect.left - s.offsetX) / s.zoom;
-    const cy = (e.clientY - rect.top  - s.offsetY) / s.zoom;
+    const cx   = (e.clientX - rect.left - s.offsetX) / s.zoom;
+    const cy   = (e.clientY - rect.top  - s.offsetY) / s.zoom;
 
     updatePresence({
       workbench:    store.getState().activeWorkbench,
@@ -152,17 +169,15 @@ export function initCursorTracking(canvasRoot: HTMLElement): void {
   });
 }
 
-// ── Manual migration ───────────────────────────────────────
+// ── Manual upload: localStorage → Firebase ─────────────────
 export async function migrateLocalToFirebase(): Promise<void> {
-  if (!isEnabled() || !getFirebaseState().user) {
-    showToast("Bitte erst anmelden", "warning");
-    return;
-  }
+  if (!isEnabled() || !getFirebaseState().user) return;
   try {
     await saveLibraryToFirebase(store.getLibrary());
     await saveWorkspaceToFirebase(store.currentWorkspaceKey(), store.getState().project);
-    showToast("Lokale Daten zu Firebase hochgeladen ✓", "success");
+    const el = document.getElementById("save-status");
+    if (el) { el.textContent = "☁ Hochgeladen"; setTimeout(() => { if (el) el.textContent = "Gespeichert"; }, 2000); }
   } catch (e) {
-    showToast("Upload fehlgeschlagen", "error");
+    console.error("Migration failed:", e);
   }
 }
