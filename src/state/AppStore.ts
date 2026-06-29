@@ -401,23 +401,25 @@ class AppStore {
   }
 
   setFaction(faction: Faction | null): void {
-    // Save current workspace before switching
     this.saveCurrentWorkspace();
     this.state.activeFaction = faction;
     this.state.undoStack = [];
     this.state.redoStack = [];
     this.loadWorkspace(this.currentWorkspaceKey());
     bus.emit("workspace:change", this.currentWorkspaceKey());
+    // Ensure the active mode UI is correct after workspace switch
+    bus.emit("mode:change", this.state.activeMode);
   }
 
   setWorkbench(wb: WorkbenchType | null): void {
-    // Save current workspace before switching
     this.saveCurrentWorkspace();
     this.state.activeWorkbench = wb;
     this.state.undoStack = [];
     this.state.redoStack = [];
     this.loadWorkspace(this.currentWorkspaceKey());
     bus.emit("workspace:change", this.currentWorkspaceKey());
+    // Ensure the active mode UI is correct after workspace switch
+    bus.emit("mode:change", this.state.activeMode);
   }
 
   setCanvas(canvas: Partial<ExodusCraftProject["canvas"]>): void {

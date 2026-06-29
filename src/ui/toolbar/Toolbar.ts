@@ -45,6 +45,14 @@ export function initToolbar(): void {
   bus.on("project:load", () => {
     syncSelectsFromState();
     refreshWorkbenchClassname();
+    updateModeButtons(store.getState().activeMode);
+  });
+  // Re-apply mode UI whenever mode:change fires (e.g. after workspace switch)
+  bus.on("mode:change", (e) => {
+    const ev = e as { payload: string };
+    if (ev.payload === "node" || ev.payload === "form") {
+      updateModeButtons(ev.payload);
+    }
   });
 
   // ── Undo / Redo ──
@@ -251,7 +259,7 @@ function updateModeButtons(mode: "node" | "form"): void {
   nodeRoot.style.display = mode === "node" ? "" : "none";
   formRoot.style.display = mode === "form" ? "flex" : "none";
   document.getElementById("sb-mode")!.textContent = mode === "node" ? "Node Editor" : "Formular Editor";
-  bus.emit("mode:change", mode);
+  // NOTE: do NOT emit mode:change here — would cause infinite loop
 }
 
 function refreshWorkbenchClassname(): void {
