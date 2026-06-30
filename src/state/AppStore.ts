@@ -302,6 +302,13 @@ class AppStore {
     bus.emit("state:change");
   }
 
+  // Sets JSON from Firebase WITHOUT emitting json:import
+  // (json:import would trigger syncJSONToNodes → addNode → infinite loop)
+  setJSONFromFirebase(data: WorkbenchJSON): void {
+    this.state.project.jsonData = JSON.parse(JSON.stringify(data));
+    bus.emit("state:change"); // re-renders FormEditor only
+  }
+
   setLibrary(items: LibraryItem[], skipLocalSave = false): void {
     // Clean up image keys for removed items
     const newClassnames = new Set(items.map(i => i.classname));
