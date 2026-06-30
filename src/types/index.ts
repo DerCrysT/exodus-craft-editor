@@ -129,6 +129,7 @@ export interface ProjectMeta {
   updatedAt: string;
   faction?: Faction;
   workbench?: WorkbenchType;
+  sessionId?: string; // identifies which browser session last saved this
 }
 
 export interface ExodusCraftProject {
