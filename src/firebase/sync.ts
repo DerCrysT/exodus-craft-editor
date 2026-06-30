@@ -1,23 +1,53 @@
+/**
+ * Firebase Sync — Granular Node/Edge persistence
+ * 
+ * Statt den ganzen Workspace als Blob zu speichern, werden
+ * Nodes und Edges als einzelne Firebase-Dokumente gespeichert:
+ *   workspaces/{key}/nodes/{nodeId}  = CraftNode
+ *   workspaces/{key}/edges/{edgeId}  = CraftEdge
+ *   workspaces/{key}/json            = WorkbenchJSON (Formular-Daten)
+ *   workspaces/{key}/canvas          = CanvasState
+ * 
+ * Damit überschreibt kein User den anderen — Firebase merged auf Dokument-Ebene.
+ */
+
 import { store } from "../state/AppStore";
 import { bus } from "../state/EventEmitter";
 import {
   isEnabled, saveLibraryToFirebase, loadLibraryFromFirebase,
-  saveWorkspaceToFirebase, loadWorkspaceFromFirebase,
   subscribeWorkspace, onLibraryUpdate, getFirebaseState,
   subscribeLibrary, updatePresence,
 } from "../firebase/service";
-import type { ExodusCraftProject, LibraryItem } from "../types/index";
+import { getDatabase, ref, set, get, onValue, off, remove } from "firebase/database";
+import { initializeApp, getApps } from "firebase/app";
+import { FIREBASE_CONFIG } from "./config";
+import type { CraftNode, CraftEdge, WorkbenchJSON, LibraryItem } from "../types/index";
+
+// ── Helpers ────────────────────────────────────────────────
+function getDb() {
+  // Reuse existing Firebase app
+  const app = getApps()[0];
+  if (!app) return null;
+  return getDatabase(app);
+}
+
+function sanitizeKey(key: string): string {
+  return key.replace(/[.#$[\]/]/g, "_");
+}
 
 // ── State ──────────────────────────────────────────────────
-let unsubWorkspace: (() => void) | null = null;
-let autoSyncTimer:  ReturnType<typeof setInterval> | null = null;
+let unsubNodes:    (() => void) | null = null;
+let unsubEdges:    (() => void) | null = null;
+let unsubJson:     (() => void) | null = null;
+let autoSyncTimer: ReturnType<typeof setInterval> | null = null;
 let receivingFromFirebase = false;
 let libSubscribed = false;
 
-// Track which workspace we "own" during this session
-// Only the owner writes — others read
-let sessionId: string = Math.random().toString(36).slice(2, 8);
-let lastKnownRemoteUpdatedAt = "";
+// Debounce timers for local → Firebase
+let nodeSaveTimer:   ReturnType<typeof setTimeout> | null = null;
+let edgeSaveTimer:   ReturnType<typeof setTimeout> | null = null;
+let jsonSaveTimer:   ReturnType<typeof setTimeout> | null = null;
+let canvasSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
 // ── Init ───────────────────────────────────────────────────
 export function initFirebaseSync(): void {
@@ -31,45 +61,83 @@ export function initFirebaseSync(): void {
 
   bus.on("workspace:change", () => {
     if (!isEnabled() || !getFirebaseState().user) return;
-    lastKnownRemoteUpdatedAt = ""; // reset on workspace switch
     resubscribeWorkspace();
   });
+
+  // Listen to local changes → push to Firebase (debounced)
+  bus.on("node:add",     () => scheduleNodeSave());
+  bus.on("node:update",  () => scheduleNodeSave());
+  bus.on("node:remove",  () => scheduleNodeSave());
+  bus.on("node:move",    () => scheduleNodeSave());
+  bus.on("edge:add",     () => scheduleEdgeSave());
+  bus.on("edge:remove",  () => scheduleEdgeSave());
+  bus.on("edge:update",  () => scheduleEdgeSave());
+  bus.on("json:formUpdate", () => scheduleJsonSave());
+  bus.on("json:import",  () => { scheduleNodeSave(); scheduleEdgeSave(); scheduleJsonSave(); });
 }
 
-// ── Auto-sync every 5 seconds ──────────────────────────────
-function startAutoSync(): void {
-  if (autoSyncTimer) clearInterval(autoSyncTimer);
-  autoSyncTimer = setInterval(() => {
-    if (!isEnabled() || !getFirebaseState().user) return;
-    if (receivingFromFirebase) return;
-    performSync();
-  }, 5000);
+// ── Save schedulers ────────────────────────────────────────
+function scheduleNodeSave(): void {
+  if (receivingFromFirebase) return;
+  if (!isEnabled() || !getFirebaseState().user) return;
+  if (nodeSaveTimer) clearTimeout(nodeSaveTimer);
+  nodeSaveTimer = setTimeout(() => saveNodes(), 1000);
 }
 
-async function performSync(): Promise<void> {
+function scheduleEdgeSave(): void {
+  if (receivingFromFirebase) return;
+  if (!isEnabled() || !getFirebaseState().user) return;
+  if (edgeSaveTimer) clearTimeout(edgeSaveTimer);
+  edgeSaveTimer = setTimeout(() => saveEdges(), 1000);
+}
+
+function scheduleJsonSave(): void {
+  if (receivingFromFirebase) return;
+  if (!isEnabled() || !getFirebaseState().user) return;
+  if (jsonSaveTimer) clearTimeout(jsonSaveTimer);
+  jsonSaveTimer = setTimeout(() => saveJson(), 1000);
+}
+
+// ── Granular save functions ────────────────────────────────
+async function saveNodes(): Promise<void> {
+  const db = getDb();
+  if (!db || !getFirebaseState().user) return;
+  const wsKey = sanitizeKey(store.currentWorkspaceKey());
+  const nodes = store.getNodes();
   try {
-    await saveLibraryToFirebase(store.getLibrary());
+    // Write all current nodes as a map {nodeId: nodeData}
+    const nodesObj = Object.fromEntries(
+      nodes.map(n => [n.id.replace(/[.#$[\]/]/g, "_"), JSON.parse(JSON.stringify(n))])
+    );
+    await set(ref(db, `workspaces/${wsKey}/nodes`), nodesObj);
+  } catch (e) { console.warn("Node save failed:", e); }
+}
 
-    const wsKey   = store.currentWorkspaceKey();
-    const project = store.getState().project;
+async function saveEdges(): Promise<void> {
+  const db = getDb();
+  if (!db || !getFirebaseState().user) return;
+  const wsKey = sanitizeKey(store.currentWorkspaceKey());
+  const edges = store.getEdges();
+  try {
+    const edgesObj = Object.fromEntries(
+      edges.map(e => [e.id.replace(/[.#$[\]/]/g, "_"), JSON.parse(JSON.stringify(e))])
+    );
+    await set(ref(db, `workspaces/${wsKey}/edges`), edgesObj);
+  } catch (e) { console.warn("Edge save failed:", e); }
+}
 
-    // Always refresh updatedAt before saving so other clients know this is newer
-    const updatedAt = new Date().toISOString();
-    const toSave: ExodusCraftProject = {
-      ...project,
-      meta: { ...project.meta, updatedAt, sessionId },
-    };
-
-    await saveWorkspaceToFirebase(wsKey, toSave);
-    lastKnownRemoteUpdatedAt = updatedAt;
-  } catch (e) {
-    console.warn("Auto-sync failed:", e);
-  }
+async function saveJson(): Promise<void> {
+  const db = getDb();
+  if (!db || !getFirebaseState().user) return;
+  const wsKey = sanitizeKey(store.currentWorkspaceKey());
+  try {
+    await set(ref(db, `workspaces/${wsKey}/json`), JSON.parse(JSON.stringify(store.getJSON())));
+  } catch (e) { console.warn("JSON save failed:", e); }
 }
 
 // ── Start / stop ───────────────────────────────────────────
 async function startSync(): Promise<void> {
-  // Load library
+  // Library
   try {
     const fbLib = await loadLibraryFromFirebase();
     if (fbLib.length > 0) {
@@ -79,7 +147,6 @@ async function startSync(): Promise<void> {
     }
   } catch (e) { console.warn("Library load failed:", e); }
 
-  // Subscribe to live library updates (only once)
   if (!libSubscribed) {
     libSubscribed = true;
     onLibraryUpdate((items: LibraryItem[]) => {
@@ -92,78 +159,87 @@ async function startSync(): Promise<void> {
   }
 
   await resubscribeWorkspace();
-  startAutoSync();
+
+  // Library auto-save every 30s (library changes less often)
+  autoSyncTimer = setInterval(() => {
+    if (!isEnabled() || !getFirebaseState().user || receivingFromFirebase) return;
+    saveLibraryToFirebase(store.getLibrary()).catch(console.warn);
+  }, 30_000);
 }
 
 function stopSync(): void {
-  if (unsubWorkspace) { unsubWorkspace(); unsubWorkspace = null; }
-  if (autoSyncTimer)  { clearInterval(autoSyncTimer); autoSyncTimer = null; }
+  unsubNodes?.(); unsubNodes = null;
+  unsubEdges?.(); unsubEdges = null;
+  unsubJson?.();  unsubJson  = null;
+  if (autoSyncTimer) { clearInterval(autoSyncTimer); autoSyncTimer = null; }
   libSubscribed = false;
-  lastKnownRemoteUpdatedAt = "";
 }
 
 // ── Workspace subscription ─────────────────────────────────
 async function resubscribeWorkspace(): Promise<void> {
-  if (!isEnabled() || !getFirebaseState().user) return;
-  if (unsubWorkspace) { unsubWorkspace(); unsubWorkspace = null; }
+  const db = getDb();
+  if (!db || !isEnabled() || !getFirebaseState().user) return;
 
-  const wsKey = store.currentWorkspaceKey();
+  // Unsubscribe previous
+  unsubNodes?.(); unsubNodes = null;
+  unsubEdges?.(); unsubEdges = null;
+  unsubJson?.();  unsubJson  = null;
 
-  // Initial load: take Firebase data only if it has a different sessionId
-  // (i.e. was saved by someone else, not us from a previous session)
+  const wsKey = sanitizeKey(store.currentWorkspaceKey());
+
+  // ── Initial load ───────────────────────────────────────
   try {
-    const fbProject = await loadWorkspaceFromFirebase(wsKey);
-    if (fbProject) {
-      const remote = fbProject as ExodusCraftProject & { meta: { sessionId?: string } };
-      const remoteSession = remote.meta?.sessionId;
-      const remoteTime    = new Date(remote.meta?.updatedAt ?? 0).getTime();
-      const localTime     = new Date(store.getState().project.meta?.updatedAt ?? 0).getTime();
+    const [nodesSnap, edgesSnap, jsonSnap] = await Promise.all([
+      get(ref(db, `workspaces/${wsKey}/nodes`)),
+      get(ref(db, `workspaces/${wsKey}/edges`)),
+      get(ref(db, `workspaces/${wsKey}/json`)),
+    ]);
 
-      // Apply Firebase data only if it's from a different session AND newer
-      if (remoteSession !== sessionId && remoteTime > localTime) {
-        receivingFromFirebase = true;
-        try {
-          store.loadProject(remote);
-          lastKnownRemoteUpdatedAt = remote.meta?.updatedAt ?? "";
-        } finally { receivingFromFirebase = false; }
+    receivingFromFirebase = true;
+    try {
+      if (nodesSnap.val()) {
+        const nodes: CraftNode[] = Object.values(nodesSnap.val());
+        store.setNodesFromFirebase(nodes);
       }
-    }
-  } catch (e) { console.warn("Workspace load failed:", e); }
-
-  // Live subscription — receive updates from other users
-  unsubWorkspace = subscribeWorkspace(wsKey, (data: unknown) => {
-    if (!data || receivingFromFirebase) return;
-
-    const remote = data as ExodusCraftProject & { meta: { sessionId?: string } };
-    const remoteSession = remote.meta?.sessionId;
-    const remoteUpdatedAt = remote.meta?.updatedAt ?? "";
-
-    // Ignore our own writes echoed back from Firebase
-    if (remoteSession === sessionId) return;
-
-    // Ignore if we've already processed this exact update
-    if (remoteUpdatedAt === lastKnownRemoteUpdatedAt) return;
-
-    const remoteTime = new Date(remoteUpdatedAt).getTime();
-    const localTime  = new Date(store.getState().project.meta?.updatedAt ?? 0).getTime();
-
-    // Only apply if remote is newer than what we have locally
-    // Use a 500ms threshold to avoid rapid back-and-forth
-    if (remoteTime > localTime + 500) {
-      receivingFromFirebase = true;
-      lastKnownRemoteUpdatedAt = remoteUpdatedAt;
-      try {
-        store.loadProject(remote);
-        const el = document.getElementById("save-status");
-        if (el) {
-          el.textContent = "↓ Teammate-Update";
-          setTimeout(() => { if (el) el.textContent = "Gespeichert"; }, 3000);
-        }
-      } finally {
-        receivingFromFirebase = false;
+      if (edgesSnap.val()) {
+        const edges: CraftEdge[] = Object.values(edgesSnap.val());
+        store.setEdgesFromFirebase(edges);
       }
-    }
+      if (jsonSnap.val()) {
+        store.setJSON(jsonSnap.val() as WorkbenchJSON);
+      }
+    } finally { receivingFromFirebase = false; }
+  } catch (e) { console.warn("Initial workspace load failed:", e); }
+
+  // ── Live subscriptions ────────────────────────────────
+  const nodesRef = ref(db, `workspaces/${wsKey}/nodes`);
+  onValue(nodesRef, snapshot => {
+    if (!snapshot.val() || receivingFromFirebase) return;
+    const nodes: CraftNode[] = Object.values(snapshot.val());
+    receivingFromFirebase = true;
+    try { store.setNodesFromFirebase(nodes); }
+    finally { receivingFromFirebase = false; }
   });
+  unsubNodes = () => off(nodesRef);
+
+  const edgesRef = ref(db, `workspaces/${wsKey}/edges`);
+  onValue(edgesRef, snapshot => {
+    if (!snapshot.val() || receivingFromFirebase) return;
+    const edges: CraftEdge[] = Object.values(snapshot.val());
+    receivingFromFirebase = true;
+    try { store.setEdgesFromFirebase(edges); }
+    finally { receivingFromFirebase = false; }
+  });
+  unsubEdges = () => off(edgesRef);
+
+  const jsonRef = ref(db, `workspaces/${wsKey}/json`);
+  onValue(jsonRef, snapshot => {
+    if (!snapshot.val() || receivingFromFirebase) return;
+    receivingFromFirebase = true;
+    try { store.setJSON(snapshot.val() as WorkbenchJSON); }
+    finally { receivingFromFirebase = false; }
+  });
+  unsubJson = () => off(jsonRef);
 }
 
 // ── Cursor tracking ────────────────────────────────────────
@@ -196,8 +272,12 @@ export function initCursorTracking(canvasRoot: HTMLElement): void {
 export async function migrateLocalToFirebase(): Promise<void> {
   if (!isEnabled() || !getFirebaseState().user) return;
   try {
-    await saveLibraryToFirebase(store.getLibrary());
-    await saveWorkspaceToFirebase(store.currentWorkspaceKey(), store.getState().project);
+    await Promise.all([
+      saveLibraryToFirebase(store.getLibrary()),
+      saveNodes(),
+      saveEdges(),
+      saveJson(),
+    ]);
     const el = document.getElementById("save-status");
     if (el) {
       el.textContent = "☁ Hochgeladen";

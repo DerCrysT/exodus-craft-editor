@@ -53,7 +53,7 @@ function validateCraftItem(item: unknown, label: string, issues: ValidationIssue
   if (!it.Result) issues.push({ id: `${label}_result`, severity: "error", message: `${label}: Result fehlt` });
   if (!it.RecipeName) issues.push({ id: `${label}_name`, severity: "warning", message: `${label}: RecipeName fehlt` });
   if (!Array.isArray(it.CraftComponents) || (it.CraftComponents as unknown[]).length === 0) {
-    issues.push({ id: `${label}_components`, severity: "error", message: `${label}: CraftComponents leer oder fehlt` });
+    issues.push({ id: `${label}_components`, severity: "warning", message: `${label}: CraftComponents leer oder fehlt` });
   }
   if (!Array.isArray(it.AttachmentsNeed)) {
     issues.push({ id: `${label}_attachments`, severity: "warning", message: `${label}: AttachmentsNeed fehlt` });

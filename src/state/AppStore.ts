@@ -284,7 +284,23 @@ class AppStore {
     this.autosave();
   }
 
-  // ── Library ───────────────────────────────────────────────
+  // ── Firebase granular setters ─────────────────────────────
+  // These update ONLY nodes or ONLY edges without touching the rest of the project
+  setNodesFromFirebase(nodes: CraftNode[]): void {
+    this.state.project.nodes = nodes;
+    this.state.selectedNodes = new Set(
+      [...this.state.selectedNodes].filter(id => nodes.some(n => n.id === id))
+    );
+    bus.emit("state:change");
+  }
+
+  setEdgesFromFirebase(edges: CraftEdge[]): void {
+    this.state.project.edges = edges;
+    if (this.state.selectedEdge && !edges.some(e => e.id === this.state.selectedEdge)) {
+      this.state.selectedEdge = null;
+    }
+    bus.emit("state:change");
+  }
 
   setLibrary(items: LibraryItem[], skipLocalSave = false): void {
     // Clean up image keys for removed items
