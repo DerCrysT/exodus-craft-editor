@@ -1,16 +1,19 @@
 /**
- * Firebase Sync — Operation-based, granular writes
+ * Firebase Sync — Granular writes + Workspace Locking
  *
- * Jede Änderung wird SOFORT als einzelner Firebase-Write gespeichert:
- *   add/update node    → set workspaces/{key}/nodes/{nodeId}
- *   remove node        → remove workspaces/{key}/nodes/{nodeId}
- *   add/update edge    → set workspaces/{key}/edges/{edgeId}
- *   remove edge        → remove workspaces/{key}/edges/{edgeId}
- *   json:formUpdate    → set workspaces/{key}/jsonData
+ * LOCKING:
+ *   workspaces/{wsKey}/__lock = { uid, displayName, since }
+ *   Wer zuerst da ist, hält den Lock.
+ *   onDisconnect → Lock wird automatisch freigegeben.
+ *   Andere User sind read-only solange Lock aktiv ist.
  *
- * Firebase merged automatisch auf Feld-Ebene.
- * onValue auf nodes/ und edges/ feuert nur bei Änderungen.
- * Kein Blob-Overwrite, kein Guard, keine Race-Conditions.
+ * WRITES (nur vom Lock-Inhaber):
+ *   nodes/{nodeId}   → einzeln schreiben/löschen
+ *   edges/{edgeId}   → einzeln schreiben/löschen
+ *   jsonData         → Formular-Daten
+ *
+ * READS (alle User):
+ *   onValue auf nodes/, edges/, jsonData → sofort angezeigt
  */
 
 import { store } from "../state/AppStore";
@@ -19,36 +22,46 @@ import {
   isEnabled, saveLibraryToFirebase, loadLibraryFromFirebase,
   onLibraryUpdate, getFirebaseState, subscribeLibrary, updatePresence,
 } from "../firebase/service";
-import { getDatabase, ref, set, remove, get, onValue, off } from "firebase/database";
+import {
+  getDatabase, ref, set, remove, get, onValue, off,
+  onDisconnect, serverTimestamp,
+} from "firebase/database";
 import { getApps } from "firebase/app";
 import type { CraftNode, CraftEdge, WorkbenchJSON, LibraryItem } from "../types/index";
 
 // ── DB helper ──────────────────────────────────────────────
 function db() {
-  const app = getApps()[0];
-  return app ? getDatabase(app) : null;
+  const apps = getApps();
+  return apps.length ? getDatabase(apps[0]) : null;
 }
 
-// Firebase keys kann keine . # $ [ ] / enthalten
-function fk(key: string): string {
-  return key.replace(/[.#$[\]/]/g, "_");
+function fk(k: string): string {
+  return k.replace(/[.#$[\]/]/g, "_");
 }
 
-function wsPath(): string {
+function wsBase(): string {
   return `workspaces/${fk(store.currentWorkspaceKey())}`;
 }
 
 // ── State ──────────────────────────────────────────────────
 let libSubscribed = false;
-let libAutoSave: ReturnType<typeof setInterval> | null = null;
-
-// Wir empfangen gerade Firebase-Daten — keine Saves auslösen
+let libAutoSave:   ReturnType<typeof setInterval> | null = null;
 let applyingRemote = false;
 
-// Aktive onValue-Unsubscriber
+// Lock state
+let weHoldLock   = false;
+let lockWsKey    = "";   // which workspace we're locked into
+
+// Unsubscribers
 let unsubNodes: (() => void) | null = null;
 let unsubEdges: (() => void) | null = null;
 let unsubJson:  (() => void) | null = null;
+let unsubLock:  (() => void) | null = null;
+
+// ── Public: can we write? ──────────────────────────────────
+export function canWrite(): boolean {
+  return weHoldLock;
+}
 
 // ── Init ───────────────────────────────────────────────────
 export function initFirebaseSync(): void {
@@ -62,142 +75,186 @@ export function initFirebaseSync(): void {
 
   bus.on("workspace:change", () => {
     if (!isEnabled() || !getFirebaseState().user) return;
-    setupWorkspaceSync();
+    releaseLock().then(() => setupWorkspace());
   });
 
-  // ── Einzelne Operationen → sofort nach Firebase ────────
+  // ── Local mutations → Firebase (only if we hold the lock) ──
+  const guard = () => applyingRemote || !canWrite() || !getFirebaseState().user;
+
   bus.on("node:add", (e) => {
-    if (applyingRemote) return;
+    if (guard()) return;
     const node = (e as { payload: CraftNode }).payload;
     if (node) writeNode(node);
   });
 
   bus.on("node:update", (e) => {
-    if (applyingRemote) return;
-    const payload = (e as { payload: { id: string } }).payload;
-    if (payload?.id) {
-      const n = store.getNode(payload.id);
-      if (n) writeNode(n);
-    }
+    if (guard()) return;
+    const { id } = (e as { payload: { id: string } }).payload ?? {};
+    if (id) { const n = store.getNode(id); if (n) writeNode(n); }
   });
 
   bus.on("node:move", (e) => {
-    if (applyingRemote) return;
-    const payload = (e as { payload: { id: string } }).payload;
-    if (payload?.id) {
-      const n = store.getNode(payload.id);
-      if (n) writeNode(n);
-    }
+    if (guard()) return;
+    const { id } = (e as { payload: { id: string } }).payload ?? {};
+    if (id) { const n = store.getNode(id); if (n) writeNode(n); }
   });
 
   bus.on("node:remove", (e) => {
-    if (applyingRemote) return;
-    const payload = (e as { payload: { id: string } }).payload;
-    if (payload?.id) deleteNode(payload.id);
+    if (guard()) return;
+    const { id } = (e as { payload: { id: string } }).payload ?? {};
+    if (id) deleteNode(id);
   });
 
   bus.on("edge:add", (e) => {
-    if (applyingRemote) return;
+    if (guard()) return;
     const edge = (e as { payload: CraftEdge }).payload;
     if (edge) writeEdge(edge);
   });
 
   bus.on("edge:update", (e) => {
-    if (applyingRemote) return;
-    const payload = (e as { payload: { id: string } }).payload;
-    if (payload?.id) {
-      const ed = store.getEdge(payload.id);
-      if (ed) writeEdge(ed);
-    }
+    if (guard()) return;
+    const { id } = (e as { payload: { id: string } }).payload ?? {};
+    if (id) { const ed = store.getEdge(id); if (ed) writeEdge(ed); }
   });
 
   bus.on("edge:remove", (e) => {
-    if (applyingRemote) return;
-    const payload = (e as { payload: { id: string } }).payload;
-    if (payload?.id) deleteEdge(payload.id);
+    if (guard()) return;
+    const { id } = (e as { payload: { id: string } }).payload ?? {};
+    if (id) deleteEdge(id);
   });
 
-  // JSON (Formular-Daten) — debounced 500ms
   let jsonTimer: ReturnType<typeof setTimeout> | null = null;
-  const scheduleJsonSave = () => {
-    if (applyingRemote) return;
-    if (!isEnabled() || !getFirebaseState().user) return;
+  const schedJson = () => {
+    if (guard()) return;
     if (jsonTimer) clearTimeout(jsonTimer);
     jsonTimer = setTimeout(() => writeJsonData(), 500);
   };
-  bus.on("json:formUpdate", scheduleJsonSave);
-  bus.on("json:import",     scheduleJsonSave);
-
-  // Beim Import: auch alle Nodes/Edges neu schreiben
+  bus.on("json:formUpdate", schedJson);
   bus.on("json:import", () => {
-    if (applyingRemote) return;
-    setTimeout(() => writeAllNodes(), 600);
-    setTimeout(() => writeAllEdges(), 600);
+    if (guard()) return;
+    schedJson();
+    setTimeout(() => { writeAllNodes(); writeAllEdges(); }, 700);
   });
 }
 
-// ── Granular write helpers ─────────────────────────────────
+// ── Lock management ────────────────────────────────────────
+async function acquireLock(): Promise<boolean> {
+  const d = db();
+  if (!d) return false;
+  const user = getFirebaseState().user;
+  if (!user) return false;
+
+  const wsKey   = fk(store.currentWorkspaceKey());
+  const lockRef = ref(d, `workspaces/${wsKey}/__lock`);
+
+  try {
+    const snap = await get(lockRef);
+    if (snap.val() && snap.val().uid !== user.uid) {
+      // Someone else holds the lock
+      return false;
+    }
+
+    // We can take the lock
+    const lockData = {
+      uid:         user.uid,
+      displayName: user.displayName ?? user.email ?? "Anonym",
+      since:       serverTimestamp(),
+    };
+    await set(lockRef, lockData);
+
+    // Auto-release when we disconnect
+    onDisconnect(lockRef).remove();
+
+    weHoldLock = true;
+    lockWsKey  = wsKey;
+    return true;
+  } catch (e) {
+    console.warn("Lock acquire failed:", e);
+    return false;
+  }
+}
+
+async function releaseLock(): Promise<void> {
+  if (!weHoldLock || !lockWsKey) return;
+  const d = db();
+  if (!d) return;
+  try {
+    await remove(ref(d, `workspaces/${lockWsKey}/__lock`));
+  } catch {}
+  weHoldLock = false;
+  lockWsKey  = "";
+}
+
+function watchLock(): void {
+  const d = db();
+  if (!d) return;
+  const wsKey   = fk(store.currentWorkspaceKey());
+  const lockRef = ref(d, `workspaces/${wsKey}/__lock`);
+
+  // Unsubscribe previous lock watcher
+  unsubLock?.(); unsubLock = null;
+
+  onValue(lockRef, (snap) => {
+    const lock = snap.val();
+    const user = getFirebaseState().user;
+    bus.emit("firebase:lock", { lock, weHoldLock, user });
+  });
+  unsubLock = () => off(lockRef);
+}
+
+// ── Granular writes ────────────────────────────────────────
 async function writeNode(node: CraftNode): Promise<void> {
   const d = db();
-  if (!d || !getFirebaseState().user) return;
-  try {
-    await set(ref(d, `${wsPath()}/nodes/${fk(node.id)}`), JSON.parse(JSON.stringify(node)));
-  } catch (e) { console.warn("writeNode failed:", e); }
+  if (!d) return;
+  try { await set(ref(d, `${wsBase()}/nodes/${fk(node.id)}`), JSON.parse(JSON.stringify(node))); }
+  catch (e) { console.warn("writeNode:", e); }
 }
 
 async function deleteNode(id: string): Promise<void> {
   const d = db();
-  if (!d || !getFirebaseState().user) return;
-  try {
-    await remove(ref(d, `${wsPath()}/nodes/${fk(id)}`));
-  } catch (e) { console.warn("deleteNode failed:", e); }
+  if (!d) return;
+  try { await remove(ref(d, `${wsBase()}/nodes/${fk(id)}`)); }
+  catch (e) { console.warn("deleteNode:", e); }
 }
 
 async function writeEdge(edge: CraftEdge): Promise<void> {
   const d = db();
-  if (!d || !getFirebaseState().user) return;
-  try {
-    await set(ref(d, `${wsPath()}/edges/${fk(edge.id)}`), JSON.parse(JSON.stringify(edge)));
-  } catch (e) { console.warn("writeEdge failed:", e); }
+  if (!d) return;
+  try { await set(ref(d, `${wsBase()}/edges/${fk(edge.id)}`), JSON.parse(JSON.stringify(edge))); }
+  catch (e) { console.warn("writeEdge:", e); }
 }
 
 async function deleteEdge(id: string): Promise<void> {
   const d = db();
-  if (!d || !getFirebaseState().user) return;
-  try {
-    await remove(ref(d, `${wsPath()}/edges/${fk(id)}`));
-  } catch (e) { console.warn("deleteEdge failed:", e); }
+  if (!d) return;
+  try { await remove(ref(d, `${wsBase()}/edges/${fk(id)}`)); }
+  catch (e) { console.warn("deleteEdge:", e); }
 }
 
 async function writeJsonData(): Promise<void> {
   const d = db();
-  if (!d || !getFirebaseState().user) return;
-  try {
-    await set(ref(d, `${wsPath()}/jsonData`), JSON.parse(JSON.stringify(store.getJSON())));
-  } catch (e) { console.warn("writeJsonData failed:", e); }
+  if (!d) return;
+  try { await set(ref(d, `${wsBase()}/jsonData`), JSON.parse(JSON.stringify(store.getJSON()))); }
+  catch (e) { console.warn("writeJsonData:", e); }
 }
 
-async function writeAllNodes(): Promise<void> {
+export async function writeAllNodes(): Promise<void> {
   const d = db();
-  if (!d || !getFirebaseState().user) return;
-  const nodes = store.getNodes();
-  const obj = Object.fromEntries(nodes.map(n => [fk(n.id), JSON.parse(JSON.stringify(n))]));
-  try {
-    await set(ref(d, `${wsPath()}/nodes`), Object.keys(obj).length ? obj : null);
-  } catch (e) { console.warn("writeAllNodes failed:", e); }
+  if (!d) return;
+  const obj = Object.fromEntries(store.getNodes().map(n => [fk(n.id), JSON.parse(JSON.stringify(n))]));
+  try { await set(ref(d, `${wsBase()}/nodes`), Object.keys(obj).length ? obj : null); }
+  catch (e) { console.warn("writeAllNodes:", e); }
 }
 
-async function writeAllEdges(): Promise<void> {
+export async function writeAllEdges(): Promise<void> {
   const d = db();
-  if (!d || !getFirebaseState().user) return;
-  const edges = store.getEdges();
-  const obj = Object.fromEntries(edges.map(e => [fk(e.id), JSON.parse(JSON.stringify(e))]));
-  try {
-    await set(ref(d, `${wsPath()}/edges`), Object.keys(obj).length ? obj : null);
-  } catch (e) { console.warn("writeAllEdges failed:", e); }
+  if (!d) return;
+  const obj = Object.fromEntries(store.getEdges().map(e => [fk(e.id), JSON.parse(JSON.stringify(e))]));
+  try { await set(ref(d, `${wsBase()}/edges`), Object.keys(obj).length ? obj : null); }
+  catch (e) { console.warn("writeAllEdges:", e); }
 }
 
-// ── Login / Logout ─────────────────────────────────────────
+// ── Start / stop ───────────────────────────────────────────
 async function onLogin(): Promise<void> {
   // Library
   try {
@@ -207,7 +264,7 @@ async function onLogin(): Promise<void> {
       try { store.setLibrary(fbLib, true); }
       finally { applyingRemote = false; }
     }
-  } catch (e) { console.warn("Library load failed:", e); }
+  } catch {}
 
   if (!libSubscribed) {
     libSubscribed = true;
@@ -220,89 +277,78 @@ async function onLogin(): Promise<void> {
     subscribeLibrary();
   }
 
-  // Library auto-save every 30s
   if (libAutoSave) clearInterval(libAutoSave);
   libAutoSave = setInterval(() => {
     if (!isEnabled() || !getFirebaseState().user || applyingRemote) return;
     saveLibraryToFirebase(store.getLibrary()).catch(console.warn);
   }, 30_000);
 
-  await setupWorkspaceSync();
+  await setupWorkspace();
 }
 
 function onLogout(): void {
-  unsubNodes?.(); unsubNodes = null;
-  unsubEdges?.(); unsubEdges = null;
-  unsubJson?.();  unsubJson  = null;
+  releaseLock();
+  stopWorkspaceSubs();
   if (libAutoSave) { clearInterval(libAutoSave); libAutoSave = null; }
   libSubscribed = false;
 }
 
-// ── Workspace subscription ─────────────────────────────────
-async function setupWorkspaceSync(): Promise<void> {
-  const d = db();
-  if (!d || !isEnabled() || !getFirebaseState().user) return;
-
-  // Alte Subscriptions stoppen
+function stopWorkspaceSubs(): void {
   unsubNodes?.(); unsubNodes = null;
   unsubEdges?.(); unsubEdges = null;
   unsubJson?.();  unsubJson  = null;
+  unsubLock?.();  unsubLock  = null;
+}
 
-  const nodesRef = ref(d, `${wsPath()}/nodes`);
-  const edgesRef = ref(d, `${wsPath()}/edges`);
-  const jsonRef  = ref(d, `${wsPath()}/jsonData`);
+// ── Setup workspace: acquire lock + subscribe ──────────────
+async function setupWorkspace(): Promise<void> {
+  const d = db();
+  if (!d || !getFirebaseState().user) return;
 
-  // ── Initial load ───────────────────────────────────────
+  stopWorkspaceSubs();
+
+  // Try to acquire lock
+  const gotLock = await acquireLock();
+  weHoldLock = gotLock;
+
+  // Watch lock changes (to show read-only banner)
+  watchLock();
+
+  // Subscribe to live data
+  const nodesRef = ref(d, `${wsBase()}/nodes`);
+  const edgesRef = ref(d, `${wsBase()}/edges`);
+  const jsonRef  = ref(d, `${wsBase()}/jsonData`);
+
+  // Initial load
   try {
-    const [nSnap, eSnap, jSnap] = await Promise.all([
-      get(nodesRef), get(edgesRef), get(jsonRef),
-    ]);
-
+    const [ns, es, js] = await Promise.all([get(nodesRef), get(edgesRef), get(jsonRef)]);
     applyingRemote = true;
     try {
-      if (nSnap.val()) {
-        store.setNodesFromFirebase(Object.values(nSnap.val()) as CraftNode[]);
-      }
-      if (eSnap.val()) {
-        store.setEdgesFromFirebase(Object.values(eSnap.val()) as CraftEdge[]);
-      }
-      if (jSnap.val()) {
-        store.setJSONFromFirebase(jSnap.val() as WorkbenchJSON);
-      }
+      if (ns.val()) store.setNodesFromFirebase(Object.values(ns.val()) as CraftNode[]);
+      if (es.val()) store.setEdgesFromFirebase(Object.values(es.val()) as CraftEdge[]);
+      if (js.val()) store.setJSONFromFirebase(js.val() as WorkbenchJSON);
     } finally { applyingRemote = false; }
-  } catch (e) { console.warn("Initial load failed:", e); }
+  } catch (e) { console.warn("Initial load:", e); }
 
-  // ── Live subscriptions ────────────────────────────────
-  // Nodes — reagiert auf jeden einzelnen add/update/remove
-  onValue(nodesRef, (snap) => {
+  // Live subscriptions
+  onValue(nodesRef, snap => {
     if (applyingRemote) return;
     applyingRemote = true;
-    try {
-      const nodes: CraftNode[] = snap.val()
-        ? Object.values(snap.val())
-        : [];
-      store.setNodesFromFirebase(nodes);
-    } finally { applyingRemote = false; }
+    try { store.setNodesFromFirebase(snap.val() ? Object.values(snap.val()) : []); }
+    finally { applyingRemote = false; }
   });
   unsubNodes = () => off(nodesRef);
 
-  // Edges
-  onValue(edgesRef, (snap) => {
+  onValue(edgesRef, snap => {
     if (applyingRemote) return;
     applyingRemote = true;
-    try {
-      const edges: CraftEdge[] = snap.val()
-        ? Object.values(snap.val())
-        : [];
-      store.setEdgesFromFirebase(edges);
-    } finally { applyingRemote = false; }
+    try { store.setEdgesFromFirebase(snap.val() ? Object.values(snap.val()) : []); }
+    finally { applyingRemote = false; }
   });
   unsubEdges = () => off(edgesRef);
 
-  // JSON (Formular)
-  onValue(jsonRef, (snap) => {
-    if (applyingRemote) return;
-    if (!snap.val()) return;
+  onValue(jsonRef, snap => {
+    if (applyingRemote || !snap.val()) return;
     applyingRemote = true;
     try { store.setJSONFromFirebase(snap.val() as WorkbenchJSON); }
     finally { applyingRemote = false; }
@@ -334,17 +380,12 @@ export function initCursorTracking(canvasRoot: HTMLElement): void {
 // ── Manual upload ───────────────────────────────────────────
 export async function migrateLocalToFirebase(): Promise<void> {
   if (!isEnabled() || !getFirebaseState().user) return;
-  try {
-    await Promise.all([
-      saveLibraryToFirebase(store.getLibrary()),
-      writeAllNodes(),
-      writeAllEdges(),
-      writeJsonData(),
-    ]);
-    const el = document.getElementById("save-status");
-    if (el) {
-      el.textContent = "☁ Hochgeladen";
-      setTimeout(() => { if (el) el.textContent = "Gespeichert"; }, 2000);
-    }
-  } catch (e) { console.error("Migration failed:", e); }
+  await Promise.all([
+    saveLibraryToFirebase(store.getLibrary()),
+    writeAllNodes(),
+    writeAllEdges(),
+    writeJsonData(),
+  ]);
+  const el = document.getElementById("save-status");
+  if (el) { el.textContent = "☁ Hochgeladen"; setTimeout(() => { if (el) el.textContent = "Gespeichert"; }, 2000); }
 }

@@ -3,6 +3,7 @@ import {
   registerEmail, signOutUser, updatePresence, isEnabled,
   type PresenceUser,
 } from "../../firebase/service";
+import { canWrite } from "../../firebase/sync";
 import { bus } from "../../state/EventEmitter";
 import { store } from "../../state/AppStore";
 import { renderTeammateCursors } from "../node-editor/NodeEditor";
@@ -15,13 +16,45 @@ export function initPresenceBar(): void {
   bus.on("firebase:presence", () => { renderPresenceBar(); doRenderCursors(); });
   bus.on("workspace:change",  () => { syncPresence(); doRenderCursors(); });
   bus.on("state:change",      () => syncPresence());
+  bus.on("firebase:lock",     (e) => {
+    const ev = e as { payload: { lock: { displayName?: string } | null } };
+    applyLockBanner(ev.payload?.lock);
+    renderPresenceBar();
+  });
 
-  // Refresh presence bar every 5 seconds to catch updates
+  // Refresh every 5s
   setInterval(() => {
     if (getFirebaseState().user) renderPresenceBar();
   }, 5000);
 
   renderPresenceBar();
+}
+
+// ── Lock banner ────────────────────────────────────────────
+function applyLockBanner(lock: { displayName?: string } | null): void {
+  // Remove old banner
+  document.getElementById("readonly-banner")?.remove();
+
+  if (!lock || canWrite()) return; // we hold the lock or no lock
+
+  // Show read-only overlay
+  const banner = document.createElement("div");
+  banner.id = "readonly-banner";
+  banner.style.cssText = `
+    position:fixed;top:44px;left:0;right:0;z-index:8000;
+    background:rgba(232,100,60,0.92);color:white;
+    padding:6px 16px;font-size:12px;font-weight:600;
+    display:flex;align-items:center;gap:10px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.3);
+  `;
+  const name = lock.displayName ?? "Jemand";
+  banner.innerHTML = `
+    🔒 <span>${esc(name)} bearbeitet diesen Workspace — du kannst nur zuschauen</span>
+    <span style="margin-left:auto;font-weight:400;font-size:11px;opacity:0.85;">
+      Wenn ${esc(name.split(" ")[0])} fertig ist oder die Seite verlässt, bekommst du Schreibrechte
+    </span>
+  `;
+  document.body.appendChild(banner);
 }
 
 function doRenderCursors(): void {

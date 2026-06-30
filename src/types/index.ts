@@ -211,6 +211,7 @@ export type AppEventType =
   | "firebase:auth"
   | "firebase:presence"
   | "firebase:library"
+  | "firebase:lock"
   | "undo"
   | "redo";
 

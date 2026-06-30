@@ -284,13 +284,12 @@ class AppStore {
     this.autosave();
   }
 
-  // ── Firebase granular setters ─────────────────────────────
-  // These update ONLY nodes or ONLY edges without touching the rest of the project
   setNodesFromFirebase(nodes: CraftNode[]): void {
     this.state.project.nodes = nodes;
     this.state.selectedNodes = new Set(
       [...this.state.selectedNodes].filter(id => nodes.some(n => n.id === id))
     );
+    // Don't mark dirty — Firebase updates shouldn't trigger autosave
     bus.emit("state:change");
   }
 
@@ -302,11 +301,10 @@ class AppStore {
     bus.emit("state:change");
   }
 
-  // Sets JSON from Firebase WITHOUT emitting json:import
-  // (json:import would trigger syncJSONToNodes → addNode → infinite loop)
   setJSONFromFirebase(data: WorkbenchJSON): void {
     this.state.project.jsonData = JSON.parse(JSON.stringify(data));
-    bus.emit("state:change"); // re-renders FormEditor only
+    // Don't emit json:import → no syncJSONToNodes loop
+    bus.emit("state:change");
   }
 
   setLibrary(items: LibraryItem[], skipLocalSave = false): void {
