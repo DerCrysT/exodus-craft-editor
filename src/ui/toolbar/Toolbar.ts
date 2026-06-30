@@ -286,11 +286,16 @@ export function updateStatusbar(): void {
   document.getElementById("sb-edges")!.textContent = `${edges} Verbindung${edges !== 1 ? "en" : ""}`;
   document.getElementById("sb-recipes")!.textContent = `${recipes} Rezept${recipes !== 1 ? "e" : ""}`;
 
-  const dot = document.getElementById("save-dot")!;
+  const dot    = document.getElementById("save-dot")!;
   const status = document.getElementById("save-status")!;
   if (state.isDirty) {
     dot.classList.add("dirty");
     status.textContent = "Nicht gespeichert";
+  } else {
+    dot.classList.remove("dirty");
+    if (status.textContent === "Nicht gespeichert") {
+      status.textContent = "Gespeichert";
+    }
   }
 
   refreshJSONPreview();

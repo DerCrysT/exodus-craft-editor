@@ -289,7 +289,7 @@ class AppStore {
     this.state.selectedNodes = new Set(
       [...this.state.selectedNodes].filter(id => nodes.some(n => n.id === id))
     );
-    // Don't mark dirty — Firebase updates shouldn't trigger autosave
+    // isDirty untouched — Firebase update doesn't mean local changes
     bus.emit("state:change");
   }
 
@@ -303,7 +303,7 @@ class AppStore {
 
   setJSONFromFirebase(data: WorkbenchJSON): void {
     this.state.project.jsonData = JSON.parse(JSON.stringify(data));
-    // Don't emit json:import → no syncJSONToNodes loop
+    // No json:import → no syncJSONToNodes loop
     bus.emit("state:change");
   }
 
