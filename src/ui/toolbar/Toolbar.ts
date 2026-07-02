@@ -90,8 +90,13 @@ export function initToolbar(): void {
 
   // ── Export JSON ──
   document.getElementById("tb-export")!.addEventListener("click", () => {
-    const json = store.exportJSON();
-    const wbName = store.getJSON().WorkbenchesClassnames[0] ?? "export";
+    const state   = store.getState();
+    const json    = store.exportJSON();
+    // Filename = workbench classname + faction, e.g. "Exodus_WB_Kleidung_Spark.json"
+    const wbName  = getWorkbenchClassname(
+      state.activeWorkbench ?? "Kleidung",
+      state.activeFaction,
+    );
     downloadFile(json, `${wbName}.json`);
     showToast("JSON exportiert", "success");
   });

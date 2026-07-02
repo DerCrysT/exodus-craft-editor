@@ -223,6 +223,8 @@ export function initAutoSync(): void {
   bus.on("edge:add",    () => syncNodesToJSON());
   bus.on("edge:remove", () => syncNodesToJSON());
   bus.on("node:remove", () => syncNodesToJSON());
+  // Fired when Firebase replaces all nodes/edges — sync to jsonData without triggering Firebase write
+  bus.on("nodes:replaced", () => syncNodesToJSON());
 
   // JSON changed from Form Editor → create missing nodes in canvas
   // syncing guard prevents the loop: node:add→syncNodesToJSON→updateJSON→json:formUpdate→syncJSONToNodes→node:add

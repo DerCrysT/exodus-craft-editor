@@ -208,6 +208,7 @@ export type AppEventType =
   | "validation:run"
   | "workspace:change"
   | "json:formUpdate"
+  | "nodes:replaced"
   | "firebase:auth"
   | "firebase:presence"
   | "firebase:library"

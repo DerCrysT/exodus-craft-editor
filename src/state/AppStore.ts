@@ -289,7 +289,7 @@ class AppStore {
     this.state.selectedNodes = new Set(
       [...this.state.selectedNodes].filter(id => nodes.some(n => n.id === id))
     );
-    // isDirty untouched — Firebase update doesn't mean local changes
+    bus.emit("nodes:replaced"); // triggers syncNodesToJSON only, not Firebase write
     bus.emit("state:change");
   }
 
@@ -298,6 +298,7 @@ class AppStore {
     if (this.state.selectedEdge && !edges.some(e => e.id === this.state.selectedEdge)) {
       this.state.selectedEdge = null;
     }
+    bus.emit("nodes:replaced"); // edges changed → also re-sync JSON
     bus.emit("state:change");
   }
 
