@@ -1,7 +1,7 @@
 import { store } from "../../state/AppStore";
 import type { LibraryItem } from "../../types/index";
 import { showToast } from "../toolbar/Toolbar";
-import { readFileAsDataURL } from "../../data/jsonHandler";
+import { readFileAsDataURL, compressImage } from "../../data/jsonHandler";
 
 // ── Pending uploads (staged before committing) ─────────────
 interface PendingUpload {
@@ -200,7 +200,10 @@ export function openUploadCenter(): void {
   // ── Add files ────────────────────────────────────────────
   async function addFiles(files: File[]): Promise<void> {
     for (const file of files) {
-      const dataUrl = await readFileAsDataURL(file);
+      const rawUrl  = await readFileAsDataURL(file);
+      // Compress to 128×128px JPEG so images fit in Firebase Realtime DB
+      // Typical: 200KB PNG → 5-15KB JPEG, still looks good at 64×64 and 200×200
+      const dataUrl = await compressImage(rawUrl, 128, 0.82);
       const id = `upload_${Date.now()}_${Math.random().toString(36).slice(2,5)}`;
       const baseName = file.name.replace(/\.[^.]+$/, "");
       const libMatch = store.getLibrary().find(i =>

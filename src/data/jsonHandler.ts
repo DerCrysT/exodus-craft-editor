@@ -139,3 +139,38 @@ export function readFileAsDataURL(file: File): Promise<string> {
     reader.readAsDataURL(file);
   });
 }
+
+/**
+ * Compress an image to max 128×128px JPEG for Firebase storage.
+ * Typical result: 3-15 KB instead of 100-500 KB.
+ * Still looks good in the 64×64px node thumbnails and 200×200px hover tooltip.
+ */
+export function compressImage(dataUrl: string, maxSize = 128, quality = 0.82): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      // Scale down preserving aspect ratio
+      let { width, height } = img;
+      if (width > maxSize || height > maxSize) {
+        if (width > height) {
+          height = Math.round((height / width) * maxSize);
+          width  = maxSize;
+        } else {
+          width  = Math.round((width / height) * maxSize);
+          height = maxSize;
+        }
+      }
+      canvas.width  = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d")!;
+      // White background for PNGs with transparency
+      ctx.fillStyle = "#1a1a1a";
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    };
+    img.onerror = () => resolve(dataUrl); // fallback: return original
+    img.src = dataUrl;
+  });
+}

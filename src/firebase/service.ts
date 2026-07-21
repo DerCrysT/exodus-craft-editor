@@ -13,6 +13,7 @@ import {
 import { FIREBASE_CONFIG, FIREBASE_ENABLED } from "./config";
 import type { LibraryItem, WorkbenchType, Faction } from "../types/index";
 import { bus } from "../state/EventEmitter";
+import { compressImage } from "../data/imageUtils";
 
 // ── Types ──────────────────────────────────────────────────
 export interface PresenceUser {
@@ -200,22 +201,21 @@ export function onLibraryUpdate(cb: (items: LibraryItem[]) => void): void {
 export async function saveLibraryToFirebase(items: LibraryItem[]): Promise<void> {
   if (!db || !state.user) return;
   try {
-    // Save each item as its own node (with imageUrl included directly)
-    // This avoids the two-phase meta/image split that was causing the bug
     const libObj: Record<string, object> = {};
     for (const item of items) {
-      // Check image size — skip if too large for Firebase
-      let imageUrl: string | undefined = item.imageUrl;
-      if (imageUrl && imageUrl.length > MAX_IMAGE_BYTES) {
-        console.warn(`Image for ${item.classname} too large (${Math.round(imageUrl.length/1024)}KB), skipping`);
-        imageUrl = undefined;
+      // Compress image to max 128×128px JPEG (~5-15KB) before saving to Firebase.
+      // This keeps the library blob small and works for all users.
+      let imageUrl: string | null = null;
+      if (item.imageUrl) {
+        try { imageUrl = await compressImage(item.imageUrl); }
+        catch { imageUrl = null; }
       }
       libObj[item.classname] = {
         classname:   item.classname,
         displayName: item.displayName,
-        category:    item.category    ?? null,
-        tags:        item.tags        ?? null,
-        imageUrl:    imageUrl         ?? null,
+        category:    item.category ?? null,
+        tags:        item.tags     ?? null,
+        imageUrl,
       };
     }
     await set(ref(db, "library"), libObj);
@@ -235,9 +235,9 @@ export async function loadLibraryFromFirebase(): Promise<LibraryItem[]> {
       return {
         classname:   item.classname,
         displayName: item.displayName,
-        category:    item.category ?? undefined,
-        tags:        item.tags     ?? undefined,
-        imageUrl:    item.imageUrl ?? undefined,
+        category:    item.category  ?? undefined,
+        tags:        item.tags      ?? undefined,
+        imageUrl:    item.imageUrl  ?? undefined,
       };
     });
   } catch (e) { console.error("Library load failed:", e); return []; }

@@ -1,9 +1,6 @@
 /**
- * Firebase Sync — Simple blob sync with workspace locking
- *
- * Lock-Inhaber schreibt den ganzen Workspace als JSON blob.
- * Andere User sind read-only und empfangen live updates.
- * Lock wird bei disconnect automatisch freigegeben.
+ * Firebase Sync — Blob sync with workspace locking
+ * Fixed: Firebase array→object conversion, lock renewal, save guards
  */
 
 import { store } from "../state/AppStore";
@@ -19,7 +16,7 @@ import {
 import { getApps } from "firebase/app";
 import type { CraftNode, CraftEdge, WorkbenchJSON, LibraryItem } from "../types/index";
 
-// ── DB helper ──────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────
 function db() {
   const apps = getApps();
   return apps.length ? getDatabase(apps[0]) : null;
@@ -27,6 +24,14 @@ function db() {
 
 function fk(k: string): string {
   return k.replace(/[.#$[\]/]/g, "_");
+}
+
+// Firebase stores JS arrays as {0:x, 1:y} objects — always convert back
+function toArray<T>(val: unknown): T[] {
+  if (!val) return [];
+  if (Array.isArray(val)) return val as T[];
+  // Firebase object with numeric keys
+  return Object.values(val) as T[];
 }
 
 // ── State ──────────────────────────────────────────────────
@@ -56,7 +61,7 @@ export function initFirebaseSync(): void {
     releaseLock().then(() => setupWorkspace());
   });
 
-  // Jede lokale Änderung → debounced blob save (nur wenn Lock-Inhaber)
+  // Local changes → save to Firebase (only if we hold the lock)
   const schedule = () => {
     if (applyingRemote || !weHoldLock || !getFirebaseState().user) return;
     if (saveTimer) clearTimeout(saveTimer);
@@ -75,34 +80,81 @@ export function initFirebaseSync(): void {
   bus.on("project:save",    schedule);
 }
 
-// ── Save workspace blob to Firebase ───────────────────────
+// ── Save blob ──────────────────────────────────────────────
+// ── Save blob ──────────────────────────────────────────────
+// ── Save blob ──────────────────────────────────────────────
 async function saveBlob(): Promise<void> {
   const d = db();
   if (!d || !weHoldLock || !getFirebaseState().user) return;
   const wsKey = fk(store.currentWorkspaceKey());
   const state = store.getState().project;
+
+  // Strip imageUrl from nodes — images live in the Library, not the workspace blob.
+  // This keeps the blob small (imageUrl can be 100-500KB per node).
+  const strippedNodes = state.nodes.map(n => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { imageUrl: _img, ...rest } = n as typeof n & { imageUrl?: string };
+    return rest;
+  });
+
   const blob = {
-    nodes:    state.nodes,
-    edges:    state.edges,
-    jsonData: state.jsonData,
-    savedAt:  new Date().toISOString(),
+    nodes:     Object.fromEntries(strippedNodes.map((n, i) => [i, n])),
+    edges:     Object.fromEntries(state.edges.map((e, i) => [i, e])),
+    jsonData:  state.jsonData,
+    savedAt:   new Date().toISOString(),
+    nodeCount: state.nodes.length,
+    edgeCount: state.edges.length,
   };
+
+  const blobStr = JSON.stringify(blob);
+  const blobSizeKB = Math.round(blobStr.length / 1024);
+
+  // Firebase SDK limit: 16 MB per write
+  if (blobStr.length > 15 * 1024 * 1024) {
+    console.error(`Workspace blob too large: ${blobSizeKB} KB`);
+    const el = document.getElementById("save-status");
+    if (el) el.textContent = `⚠ Zu groß (${blobSizeKB} KB)`;
+    return;
+  }
+
   try {
-    await set(ref(d, `workspaces/${wsKey}/data`), JSON.parse(JSON.stringify(blob)));
-  } catch (e) { console.warn("saveBlob failed:", e); }
+    await set(ref(d, `workspaces/${wsKey}/data`), JSON.parse(blobStr));
+    const el = document.getElementById("save-status");
+    if (el) el.textContent = `☁ Synced (${blobSizeKB} KB)`;
+  } catch (e: unknown) {
+    console.error("saveBlob failed:", e);
+    const el = document.getElementById("save-status");
+    if (el) el.textContent = "⚠ Sync-Fehler";
+  }
 }
 
 // ── Apply remote blob ──────────────────────────────────────
-function applyBlob(blob: {
-  nodes?: CraftNode[];
-  edges?: CraftEdge[];
-  jsonData?: WorkbenchJSON;
-}): void {
+function applyBlob(blob: Record<string, unknown>): void {
+  if (!blob) return;
   applyingRemote = true;
   try {
-    if (Array.isArray(blob.nodes))   store.setNodesFromFirebase(blob.nodes);
-    if (Array.isArray(blob.edges))   store.setEdgesFromFirebase(blob.edges);
-    if (blob.jsonData)               store.setJSONFromFirebase(blob.jsonData);
+    const nodes = toArray<CraftNode>(blob.nodes);
+    const edges  = toArray<CraftEdge>(blob.edges);
+    const json   = blob.jsonData as WorkbenchJSON | undefined;
+
+    // Restore imageUrl from library (compressed images are in Firebase library,
+    // already loaded into store.getLibrary() by the time workspace loads)
+    const library = store.getLibrary();
+    const libMap  = new Map(library.map(item => [item.classname, item.imageUrl]));
+    const nodesWithImages = nodes.map(n => ({
+      ...n,
+      imageUrl: libMap.get(n.classname) ?? n.imageUrl,
+    }));
+
+    if (nodes.length > 0 || blob.nodes !== undefined) {
+      store.setNodesFromFirebase(nodesWithImages);
+    }
+    if (edges.length > 0 || blob.edges !== undefined) {
+      store.setEdgesFromFirebase(edges);
+    }
+    if (json) {
+      store.setJSONFromFirebase(json);
+    }
   } finally {
     applyingRemote = false;
   }
@@ -118,20 +170,22 @@ async function acquireLock(): Promise<boolean> {
   const lockRef = ref(d, `workspaces/${wsKey}/lock`);
 
   try {
-    const snap = await get(lockRef);
-    const existing = snap.val();
-    if (existing && existing.uid !== user.uid) return false; // someone else has it
+    const snap     = await get(lockRef);
+    const existing = snap.val() as { uid: string } | null;
 
-    await set(lockRef, {
-      uid:         user.uid,
-      displayName: user.displayName ?? user.email ?? "Anonym",
-      since:       serverTimestamp(),
-    });
-    onDisconnect(lockRef).remove();
-
-    weHoldLock = true;
-    lockWsKey  = wsKey;
-    return true;
+    // Lock free or we already hold it
+    if (!existing || existing.uid === user.uid) {
+      await set(lockRef, {
+        uid:         user.uid,
+        displayName: user.displayName ?? user.email ?? "Anonym",
+        since:       serverTimestamp(),
+      });
+      onDisconnect(lockRef).remove();
+      weHoldLock = true;
+      lockWsKey  = wsKey;
+      return true;
+    }
+    return false;
   } catch (e) {
     console.warn("acquireLock failed:", e);
     return false;
@@ -150,12 +204,24 @@ async function releaseLock(): Promise<void> {
 function watchLock(wsKey: string): void {
   const d = db();
   if (!d) return;
-  const lockRef = ref(d, `workspaces/${wsKey}/lock`);
   unsubLock?.(); unsubLock = null;
 
+  const lockRef = ref(d, `workspaces/${wsKey}/lock`);
   onValue(lockRef, snap => {
     const lock = snap.val() as { uid: string; displayName: string } | null;
     const user = getFirebaseState().user;
+
+    // Lock was released — try to acquire it
+    if (!lock && !weHoldLock && user) {
+      acquireLock().then(got => {
+        if (got) {
+          // Now we have write access — update banner
+          bus.emit("firebase:lock", { lock: null, weHoldLock: true });
+        }
+      });
+      return;
+    }
+
     bus.emit("firebase:lock", { lock, weHoldLock, myUid: user?.uid });
   });
   unsubLock = () => off(lockRef);
@@ -166,41 +232,39 @@ async function setupWorkspace(): Promise<void> {
   const d = db();
   if (!d || !getFirebaseState().user) return;
 
-  // Stop previous subscription
   unsubWs?.(); unsubWs = null;
 
-  const wsKey  = fk(store.currentWorkspaceKey());
+  const wsKey   = fk(store.currentWorkspaceKey());
   const dataRef = ref(d, `workspaces/${wsKey}/data`);
 
-  // Try to get the lock
-  const got = await acquireLock();
-  weHoldLock = got;
+  // Acquire lock
+  await acquireLock();
 
-  // Watch lock changes for banner
+  // Watch lock (handles lock release → auto acquire)
   watchLock(wsKey);
 
-  // Initial load from Firebase
+  // Initial load — always load what's in Firebase
   try {
     const snap = await get(dataRef);
     if (snap.val()) {
-      applyBlob(snap.val());
+      applyBlob(snap.val() as Record<string, unknown>);
     }
   } catch (e) { console.warn("Initial load failed:", e); }
 
-  // Live subscription — fires when lock-holder saves
+  // Live updates for read-only users
   onValue(dataRef, snap => {
+    // Skip if we're applying remote data or there's nothing
     if (applyingRemote || !snap.val()) return;
-    // Lock-holder: ignore own echo (we just wrote this)
+    // Lock holder: don't apply own echo
     if (weHoldLock) return;
-    // Read-only users: always apply
-    applyBlob(snap.val());
+    // Read-only: apply immediately
+    applyBlob(snap.val() as Record<string, unknown>);
   });
   unsubWs = () => off(dataRef);
 }
 
 // ── Login / Logout ─────────────────────────────────────────
 async function onLogin(): Promise<void> {
-  // Library
   try {
     const fbLib = await loadLibraryFromFirebase();
     if (fbLib.length > 0) {
@@ -263,15 +327,14 @@ export function initCursorTracking(canvasRoot: HTMLElement): void {
 // ── Manual upload ───────────────────────────────────────────
 export async function migrateLocalToFirebase(): Promise<void> {
   if (!isEnabled() || !getFirebaseState().user) return;
-  weHoldLock = true; // temporarily allow save
-  await Promise.all([
-    saveLibraryToFirebase(store.getLibrary()),
-    saveBlob(),
-  ]);
-  weHoldLock = canWrite();
-  const el = document.getElementById("save-status");
-  if (el) {
-    el.textContent = "☁ Hochgeladen";
-    setTimeout(() => { if (el) el.textContent = "Gespeichert"; }, 2000);
+  const prevLock = weHoldLock;
+  weHoldLock = true;
+  try {
+    await Promise.all([
+      saveLibraryToFirebase(store.getLibrary()),
+      saveBlob(),
+    ]);
+  } finally {
+    weHoldLock = prevLock;
   }
 }
