@@ -2,8 +2,9 @@ import { defineConfig } from "vite";
 import { resolve } from "path";
 
 export default defineConfig({
-  // Must match your GitHub repo name for Pages deployment
-  base: "/exodus-craft-editor/",
+  // Change base to your GitHub repo name for Pages deployment
+  // e.g. base: "/exodus-craft-editor/"
+  base: "./",
   build: {
     outDir: "dist",
     sourcemap: true,

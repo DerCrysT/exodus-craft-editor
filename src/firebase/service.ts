@@ -200,22 +200,17 @@ export function onLibraryUpdate(cb: (items: LibraryItem[]) => void): void {
 export async function saveLibraryToFirebase(items: LibraryItem[]): Promise<void> {
   if (!db || !state.user) return;
   try {
-    // Save each item as its own node (with imageUrl included directly)
-    // This avoids the two-phase meta/image split that was causing the bug
+    // Save ONLY metadata — no images.
+    // Images (base64) are potentially 100-500KB each and would hit Firebase limits.
+    // They stay in localStorage only and are restored locally on load.
     const libObj: Record<string, object> = {};
     for (const item of items) {
-      // Check image size — skip if too large for Firebase
-      let imageUrl: string | undefined = item.imageUrl;
-      if (imageUrl && imageUrl.length > MAX_IMAGE_BYTES) {
-        console.warn(`Image for ${item.classname} too large (${Math.round(imageUrl.length/1024)}KB), skipping`);
-        imageUrl = undefined;
-      }
       libObj[item.classname] = {
         classname:   item.classname,
         displayName: item.displayName,
-        category:    item.category    ?? null,
-        tags:        item.tags        ?? null,
-        imageUrl:    imageUrl         ?? null,
+        category:    item.category ?? null,
+        tags:        item.tags     ?? null,
+        // imageUrl deliberately omitted — lives in localStorage
       };
     }
     await set(ref(db, "library"), libObj);
@@ -232,12 +227,14 @@ export async function loadLibraryFromFirebase(): Promise<LibraryItem[]> {
         classname: string; displayName: string;
         category?: string; tags?: string[]; imageUrl?: string;
       };
+      // Restore image from localStorage (images are not stored in Firebase)
+      const localImage = localStorage.getItem(`exodus_craft_library_img_${item.classname}`) ?? undefined;
       return {
         classname:   item.classname,
         displayName: item.displayName,
         category:    item.category ?? undefined,
         tags:        item.tags     ?? undefined,
-        imageUrl:    item.imageUrl ?? undefined,
+        imageUrl:    item.imageUrl ?? localImage,
       };
     });
   } catch (e) { console.error("Library load failed:", e); return []; }
