@@ -1811,7 +1811,7 @@ function finishQuickConnect(): void {
 function handleQuickConnectClick(targetNodeId: string): boolean {
   if (!quickConnectMode) return false;
   const targetNode = store.getNode(targetNodeId);
-  if (!targetNode || targetNode.nodeType !== "recipe") return true;
+  if (!targetNode || targetNode.nodeType === "comment" || targetNode.nodeType === "area") return true;
   if (quickConnectSources.includes(targetNodeId)) return true;
 
   const NODE_H  = 100, PAD = 20;
@@ -2032,6 +2032,31 @@ function showContextMenu(mx: number, my: number, nodeId: NodeId | null): void {
     menu.appendChild(item("Node hinzufügen", "+", () => openQuickAddModal(snap(pos.x), snap(pos.y))));
     menu.appendChild(item("💬 Kommentar",    "💬", () => addCommentNode(snap(pos.x), snap(pos.y))));
     menu.appendChild(item("🟥 Bereich",      "🟥", () => addAreaNode(snap(pos.x), snap(pos.y))));
+    const clip = getClipboard();
+    if (clip && clip.nodes.length > 0) {
+      menu.appendChild(item(`Einfügen (${clip.nodes.length} Nodes)`, "⎘", () => {
+        const minX  = Math.min(...clip.nodes.map(n => n.position.x));
+        const minY  = Math.min(...clip.nodes.map(n => n.position.y));
+        const maxX  = Math.max(...clip.nodes.map(n => n.position.x));
+        const maxY  = Math.max(...clip.nodes.map(n => n.position.y));
+        const cSrcX = (minX + maxX) / 2;
+        const cSrcY = (minY + maxY) / 2;
+        const offX  = pos.x - cSrcX;
+        const offY  = pos.y - cSrcY;
+        const newIds: string[] = [];
+        clip.nodes.forEach((srcNode, i) => {
+          const id = `node_paste_${Date.now()}_${i}`;
+          newIds.push(id);
+          const lib = store.getLibrary().find(l => l.classname === srcNode.classname);
+          store.addNode({ ...JSON.parse(JSON.stringify(srcNode)), id,
+            imageUrl: lib?.imageUrl ?? srcNode.imageUrl,
+            position: { x: snap(srcNode.position.x + offX), y: snap(srcNode.position.y + offY) } });
+        });
+        store.deselectAll();
+        newIds.forEach(id => store.selectNode(id, true));
+        showToast(`${newIds.length} eingefügt`, "success");
+      }));
+    }
     menu.appendChild(item("Auto Layout",     "⚙", autoLayout));
     menu.appendChild(item("Alles einpassen", "⊡", fitAll));
     menu.appendChild(sep());
