@@ -47,6 +47,10 @@ let draftPort: "in" | "out" | null = null;
 let lastClickId:   NodeId | null = null;
 let lastClickTime  = 0;
 
+// Track last known mouse position in canvas coords (for paste-at-cursor)
+let lastMouseCanvasX = 0;
+let lastMouseCanvasY = 0;
+
 // Edge label editing
 let editingEdgeId: EdgeId | null = null;
 
@@ -290,6 +294,11 @@ function onCanvasMouseDown(e: MouseEvent): void {
 }
 
 function onWindowMouseMove(e: MouseEvent): void {
+  // Always track mouse position in canvas coords for paste-at-cursor
+  const canvasPos = toCanvas(e.clientX, e.clientY);
+  lastMouseCanvasX = canvasPos.x;
+  lastMouseCanvasY = canvasPos.y;
+
   if (panning) {
     ox = e.clientX - panX0;
     oy = e.clientY - panY0;
@@ -310,19 +319,28 @@ function onWindowMouseMove(e: MouseEvent): void {
     });
 
     // Edge-pan: scroll canvas when dragging near the viewport edge
-    const rect    = root.getBoundingClientRect();
-    const EDGE    = 60; // px from edge to start panning
-    const PAN_SPD = 8;  // px per frame
-    let   panDX   = 0, panDY = 0;
-    if (e.clientX - rect.left  < EDGE) panDX = -PAN_SPD;
-    if (rect.right  - e.clientX < EDGE) panDX =  PAN_SPD;
-    if (e.clientY - rect.top   < EDGE) panDY = -PAN_SPD;
-    if (rect.bottom - e.clientY < EDGE) panDY =  PAN_SPD;
+    // Progressive speed: faster the closer to the edge
+    const rect     = root.getBoundingClientRect();
+    const EDGE     = 100; // px from edge where panning starts
+    const MAX_SPD  = 20;  // max px per frame at the very edge
+    let   panDX    = 0, panDY = 0;
+
+    const distLeft   = e.clientX - rect.left;
+    const distRight  = rect.right  - e.clientX;
+    const distTop    = e.clientY - rect.top;
+    const distBottom = rect.bottom - e.clientY;
+
+    // Speed ramps up linearly as you get closer to the edge
+    if (distLeft   < EDGE) panDX = -MAX_SPD * (1 - distLeft   / EDGE);
+    if (distRight  < EDGE) panDX =  MAX_SPD * (1 - distRight  / EDGE);
+    if (distTop    < EDGE) panDY = -MAX_SPD * (1 - distTop    / EDGE);
+    if (distBottom < EDGE) panDY =  MAX_SPD * (1 - distBottom / EDGE);
+
     if (panDX !== 0 || panDY !== 0) {
       ox += panDX; oy += panDY;
       applyTransform();
-      // Adjust drag origin so nodes don't jump
-      dragMX0 += panDX; dragMY0 += panDY;
+      // Shift drag origin so nodes don't jump relative to cursor
+      dragMX0 -= panDX; dragMY0 -= panDY;
     }
 
     renderEdges();
@@ -405,28 +423,28 @@ function onKeyDown(e: KeyboardEvent): void {
     const clip = getClipboard();
     if (!clip || clip.nodes.length === 0) return;
 
-    // Paste at canvas center offset from original position
-    const rect = root.getBoundingClientRect();
-    const centerX = (rect.width  / 2 - ox) / zoom;
-    const centerY = (rect.height / 2 - oy) / zoom;
-
-    // Find bounding box of copied nodes
+    // Paste centered on current mouse position in canvas coords
     const minX = Math.min(...clip.nodes.map(n => n.position.x));
     const minY = Math.min(...clip.nodes.map(n => n.position.y));
+    const maxX = Math.max(...clip.nodes.map(n => n.position.x));
+    const maxY = Math.max(...clip.nodes.map(n => n.position.y));
+    const centerSrcX = (minX + maxX) / 2;
+    const centerSrcY = (minY + maxY) / 2;
+    const offsetX    = lastMouseCanvasX - centerSrcX;
+    const offsetY    = lastMouseCanvasY - centerSrcY;
 
     const newIds: string[] = [];
     clip.nodes.forEach((srcNode, i) => {
-      const id = `node_paste_${Date.now()}_${i}`;
+      const id  = `node_paste_${Date.now()}_${i}`;
       newIds.push(id);
       const lib = store.getLibrary().find(l => l.classname === srcNode.classname);
       store.addNode({
         ...JSON.parse(JSON.stringify(srcNode)),
         id,
         imageUrl: lib?.imageUrl ?? srcNode.imageUrl,
-        // Keep ALL properties: category, craftType, attachmentsNeed, resultCount etc.
         position: {
-          x: snap(centerX + (srcNode.position.x - minX)),
-          y: snap(centerY + (srcNode.position.y - minY)),
+          x: snap(srcNode.position.x + offsetX),
+          y: snap(srcNode.position.y + offsetY),
         },
       });
     });
@@ -1707,7 +1725,7 @@ function startQuickConnect(clickedId: string): void {
   quickConnectSources = selected;
   quickConnectMode    = true;
 
-  // Visual feedback
+  // Banner
   const banner = document.createElement("div");
   banner.id = "quick-connect-banner";
   banner.style.cssText = `
@@ -1716,14 +1734,37 @@ function startQuickConnect(clickedId: string): void {
     font-size:12px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,0.4);
     pointer-events:none;
   `;
-  banner.textContent = `⚡ Quick Connect: Klicke auf Ziel-Nodes • Enter = fertig • Esc = abbrechen`;
+  banner.textContent = `⚡ ${quickConnectSources.length} Komponenten → Ziel-Nodes anklicken • Enter/Esc = fertig`;
   document.body.appendChild(banner);
 
-  // Highlight source nodes
+  // Highlight source nodes blue
   quickConnectSources.forEach(id => {
     const el = nodesLayer.querySelector<HTMLElement>(`[data-node-id="${id}"]`);
     if (el) el.style.outline = "2px solid var(--accent)";
   });
+
+  // Add hover effect to all other nodes
+  nodesLayer.querySelectorAll<HTMLElement>(".craft-node").forEach(el => {
+    const nid = el.dataset.nodeId!;
+    if (!quickConnectSources.includes(nid)) {
+      el.style.cursor = "crosshair";
+      el.addEventListener("mouseenter", onQCNodeHover);
+      el.addEventListener("mouseleave", onQCNodeLeave);
+    }
+  });
+}
+
+function onQCNodeHover(e: Event): void {
+  const el = (e.currentTarget as HTMLElement);
+  if (!quickConnectMode) return;
+  el.style.outline = "2px solid var(--success)";
+}
+
+function onQCNodeLeave(e: Event): void {
+  const el = (e.currentTarget as HTMLElement);
+  const nid = el.dataset.nodeId!;
+  // Keep green if already connected in this session
+  if (!quickConnectSources.includes(nid)) el.style.outline = "";
 }
 
 function finishQuickConnect(): void {
@@ -1732,6 +1773,9 @@ function finishQuickConnect(): void {
   document.getElementById("quick-connect-banner")?.remove();
   nodesLayer.querySelectorAll<HTMLElement>(".craft-node").forEach(el => {
     el.style.outline = "";
+    el.style.cursor  = "";
+    el.removeEventListener("mouseenter", onQCNodeHover);
+    el.removeEventListener("mouseleave", onQCNodeLeave);
   });
   renderAll();
 }
@@ -1740,25 +1784,23 @@ function handleQuickConnectClick(targetNodeId: string): boolean {
   if (!quickConnectMode) return false;
   const targetNode = store.getNode(targetNodeId);
   if (!targetNode || targetNode.nodeType !== "recipe") return true;
+  if (quickConnectSources.includes(targetNodeId)) return true;
 
-  const NODE_W = 184, NODE_H = 100, PAD = 20;
-  const existingEdges = store.getEdges();
+  const NODE_H  = 100, PAD = 20;
+  const existing = store.getEdges();
 
   quickConnectSources.forEach((srcId, i) => {
     const src = store.getNode(srcId);
     if (!src) return;
 
-    // Check if edge already exists
-    const exists = existingEdges.some(
+    const alreadyEdge = existing.some(
       e => e.sourceNodeId === srcId && e.targetNodeId === targetNodeId
     );
-    if (exists) return;
+    if (alreadyEdge) return;
 
-    // Create a copy of the source node positioned near the target
-    const angle    = (i / quickConnectSources.length) * 2 * Math.PI - Math.PI / 2;
-    const radius   = 260;
-    const newX     = snap(targetNode.position.x - radius + Math.cos(angle) * 80);
-    const newY     = snap(targetNode.position.y + 40 + i * (NODE_H + PAD));
+    // Place copies to the left of the target, stacked vertically
+    const newX = snap(targetNode.position.x - 240);
+    const newY = snap(targetNode.position.y + i * (NODE_H + PAD));
 
     const newNodeId = `node_qc_${Date.now()}_${i}`;
     store.addNode({
@@ -1766,7 +1808,6 @@ function handleQuickConnectClick(targetNodeId: string): boolean {
       id:       newNodeId,
       position: { x: newX, y: newY },
     });
-
     store.addEdge({
       id:           `edge_qc_${Date.now()}_${i}`,
       sourceNodeId: newNodeId,
@@ -1777,14 +1818,11 @@ function handleQuickConnectClick(targetNodeId: string): boolean {
     });
   });
 
-  // Flash the target node
+  // Mark this target node green
   const el = nodesLayer.querySelector<HTMLElement>(`[data-node-id="${targetNodeId}"]`);
-  if (el) {
-    el.style.outline = "2px solid var(--success)";
-    setTimeout(() => { el.style.outline = ""; }, 600);
-  }
+  if (el) el.style.outline = "2px solid var(--success)";
 
-  showToast(`${quickConnectSources.length} Verbindungen zu ${targetNode.classname} erstellt`, "success");
+  showToast(`✓ ${targetNode.classname}`, "success");
   return true;
 }
 
@@ -1912,10 +1950,17 @@ function showContextMenu(mx: number, my: number, nodeId: NodeId | null): void {
     }));
     if (selCount > 1) {
       menu.appendChild(sep());
+      menu.appendChild(item(`✏ Mass Edit (${selCount} Nodes)`, "✏", () => {
+        import("../panels/MassEdit").then(m => m.openMassEditModal());
+      }));
       menu.appendChild(item(`⚡ Quick Connect (${selCount} Nodes)`, "⚡", () => startQuickConnect(nodeId)));
     }
     menu.appendChild(sep());
     menu.appendChild(item("Node löschen",   "🗑", () => store.removeNode(nodeId), true));
+    if (selCount > 1) {
+      menu.appendChild(item(`${selCount} Nodes löschen`, "🗑",
+        () => { [...store.getState().selectedNodes].forEach(id => store.removeNode(id)); }, true));
+    }
   } else {
     const pos = toCanvas(mx, my);
     menu.appendChild(item("Node hinzufügen", "+", () => openQuickAddModal(snap(pos.x), snap(pos.y))));
