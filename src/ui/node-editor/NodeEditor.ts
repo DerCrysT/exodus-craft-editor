@@ -1732,6 +1732,8 @@ function addAreaNode(x: number, y: number): void {
 let quickConnectMode    = false;
 let quickConnectSources: string[] = [];
 let quickConnectHovered: string | null = null; // last hovered target node
+let qcOriginX = 0, qcOriginY = 0; // staging area top-left, below the selected sources
+let qcPlacedRows = 0;             // how many target-groups have been placed so far
 
 function startQuickConnect(clickedId: string): void {
   const selected = [...store.getState().selectedNodes];
@@ -1739,6 +1741,13 @@ function startQuickConnect(clickedId: string): void {
 
   quickConnectSources = selected;
   quickConnectMode    = true;
+  qcPlacedRows        = 0;
+
+  // Staging area: below the bounding box of the selected source nodes,
+  // so newly created copies never land on top of existing nodes.
+  const srcNodes = quickConnectSources.map(id => store.getNode(id)).filter(Boolean) as CraftNode[];
+  qcOriginX = Math.min(...srcNodes.map(n => n.position.x));
+  qcOriginY = Math.max(...srcNodes.map(n => n.position.y)) + 100 + 40;
 
   // Banner
   const banner = document.createElement("div");
@@ -1813,10 +1822,23 @@ function handleQuickConnectClick(targetNodeId: string): boolean {
   const targetNode = store.getNode(targetNodeId);
   if (!targetNode || targetNode.nodeType === "comment" || targetNode.nodeType === "area") return true;
   if (quickConnectSources.includes(targetNodeId)) return true;
+  if (qcConnectedTargets.has(targetNodeId)) return true; // already connected this session
 
-  const NODE_H  = 100, PAD = 20;
+  const NODE_W  = 184, NODE_H = 100, PAD = 30;
   const existing = store.getEdges();
+  const allNodes = store.getNodes();
 
+  // Reuse the amount already used elsewhere for the same component classname,
+  // e.g. if "Scrap" is used as ×5 in another recipe, default new edges to ×5 too.
+  const amountForClassname = (classname: string): number => {
+    for (const e of existing) {
+      const sNode = allNodes.find(n => n.id === e.sourceNodeId);
+      if (sNode && sNode.classname === classname) return e.amount;
+    }
+    return 1;
+  };
+
+  const row = qcPlacedRows;
   quickConnectSources.forEach((srcId, i) => {
     const src = store.getNode(srcId);
     if (!src) return;
@@ -1826,9 +1848,10 @@ function handleQuickConnectClick(targetNodeId: string): boolean {
     );
     if (alreadyEdge) return;
 
-    // Place copies to the left of the target, stacked vertically
-    const newX = snap(targetNode.position.x - 240);
-    const newY = snap(targetNode.position.y + i * (NODE_H + PAD));
+    // Place copies in a grid in the staging area below the originally
+    // selected sources: one column per source, one row per target clicked.
+    const newX = snap(qcOriginX + i * (NODE_W + PAD));
+    const newY = snap(qcOriginY + row * (NODE_H + PAD));
 
     const newNodeId = `node_qc_${Date.now()}_${i}`;
     store.addNode({
@@ -1840,11 +1863,12 @@ function handleQuickConnectClick(targetNodeId: string): boolean {
       id:           `edge_qc_${Date.now()}_${i}`,
       sourceNodeId: newNodeId,
       targetNodeId,
-      amount:       1,
+      amount:       amountForClassname(src.classname),
       destroy:      true,
       changehealth: 0,
     });
   });
+  qcPlacedRows++;
 
   // Mark this target as connected (stays green)
   qcConnectedTargets.add(targetNodeId);
