@@ -5,6 +5,7 @@ import { setZoomDisplay, showToast } from "../toolbar/Toolbar";
 import { WORKBENCH_DEFS } from "../../data/workbenches";
 import { virtualRenderer } from "./VirtualRenderer";
 import { copyNodesToClipboard, getClipboard } from "../../data/clipboard";
+import { openResourceChain } from "../panels/ResourceChain";
 
 // ── Constants ──────────────────────────────────────────────
 const GRID        = 20;
@@ -2069,6 +2070,7 @@ function showContextMenu(mx: number, my: number, nodeId: NodeId | null): void {
       store.addNode({ ...JSON.parse(JSON.stringify(n)),
         id: `node_${Date.now()}`, position: { x: n.position.x + 40, y: n.position.y + 40 } });
     }));
+    menu.appendChild(item("🧬 Benötigte Ressourcen", "🧬", () => openResourceChain(nodeId)));
     menu.appendChild(sep());
     menu.appendChild(item(`Kopieren (${selCount > 1 ? selCount + " Nodes" : "Node"})`, "⎘", () => {
       const ids   = selCount > 1 ? [...store.getState().selectedNodes] : [nodeId];
