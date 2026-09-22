@@ -468,11 +468,7 @@ function onKeyDown(e: KeyboardEvent): void {
     if (focusedNodeId) { focusedNodeId = null; updateCategoryFilterUI(); renderAll(); }
   }
   if (e.key === "Enter" && quickConnectMode) {
-    if (quickConnectHovered) {
-      handleQuickConnectClick(quickConnectHovered);
-    } else {
-      finishQuickConnect();
-    }
+    confirmQuickConnect();
     return;
   }
 
@@ -1728,12 +1724,13 @@ function addAreaNode(x: number, y: number): void {
 // ── Quick Connect ──────────────────────────────────────────
 // Connects selected component nodes to multiple result nodes.
 // Usage: select component nodes → right-click one → "Quick Connect"
-// Then click result nodes to connect, press Enter/Escape to finish.
+// Then click result nodes to queue them (orange), press Enter to connect
+// everything at once, or Escape to cancel. Nothing is created until Enter.
 let quickConnectMode    = false;
 let quickConnectSources: string[] = [];
 let quickConnectHovered: string | null = null; // last hovered target node
+let quickConnectPending: string[] = [];         // targets queued, in click order
 let qcOriginX = 0, qcOriginY = 0; // staging area top-left, below the selected sources
-let qcPlacedRows = 0;             // how many target-groups have been placed so far
 
 function startQuickConnect(clickedId: string): void {
   const selected = [...store.getState().selectedNodes];
@@ -1741,7 +1738,7 @@ function startQuickConnect(clickedId: string): void {
 
   quickConnectSources = selected;
   quickConnectMode    = true;
-  qcPlacedRows        = 0;
+  quickConnectPending  = [];
 
   // Staging area: below the bounding box of the selected source nodes,
   // so newly created copies never land on top of existing nodes.
@@ -1758,8 +1755,8 @@ function startQuickConnect(clickedId: string): void {
     font-size:12px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,0.4);
     pointer-events:none;
   `;
-  banner.textContent = `⚡ ${quickConnectSources.length} Komponenten → Ziel-Nodes anklicken • Enter/Esc = fertig`;
   document.body.appendChild(banner);
+  updateQCBanner();
 
   // Highlight source nodes blue
   quickConnectSources.forEach(id => {
@@ -1778,12 +1775,21 @@ function startQuickConnect(clickedId: string): void {
   });
 }
 
-const qcConnectedTargets = new Set<string>();
+function updateQCBanner(): void {
+  const banner = document.getElementById("quick-connect-banner");
+  if (!banner) return;
+  const n = quickConnectPending.length;
+  banner.textContent = n > 0
+    ? `⚡ ${quickConnectSources.length} Komponenten → ${n} Ziel${n !== 1 ? "e" : ""} ausgewählt • Enter = verbinden • Esc = abbrechen`
+    : `⚡ ${quickConnectSources.length} Komponenten → Ziel-Nodes anklicken • Enter = verbinden • Esc = abbrechen`;
+}
 
 function onQCNodeHover(e: Event): void {
-  const el = (e.currentTarget as HTMLElement);
+  const el  = (e.currentTarget as HTMLElement);
+  const nid = el.dataset.nodeId!;
   if (!quickConnectMode) return;
-  quickConnectHovered = el.dataset.nodeId ?? null;
+  quickConnectHovered = nid;
+  if (quickConnectPending.includes(nid)) return; // keep pending color
   el.style.outline = "2px solid var(--success)";
   const portIn = el.querySelector<HTMLElement>(".port-in");
   if (portIn) { portIn.style.background = "var(--success)"; portIn.style.transform = "scale(1.4)"; }
@@ -1793,7 +1799,7 @@ function onQCNodeLeave(e: Event): void {
   const el  = (e.currentTarget as HTMLElement);
   const nid = el.dataset.nodeId!;
   if (quickConnectHovered === nid) quickConnectHovered = null;
-  if (!qcConnectedTargets.has(nid)) {
+  if (!quickConnectPending.includes(nid)) {
     el.style.outline = "";
     const portIn = el.querySelector<HTMLElement>(".port-in");
     if (portIn) { portIn.style.background = ""; portIn.style.transform = ""; }
@@ -1804,7 +1810,7 @@ function finishQuickConnect(): void {
   quickConnectMode    = false;
   quickConnectSources = [];
   quickConnectHovered = null;
-  qcConnectedTargets.clear();
+  quickConnectPending = [];
   document.getElementById("quick-connect-banner")?.remove();
   nodesLayer.querySelectorAll<HTMLElement>(".craft-node").forEach(el => {
     el.style.outline = "";
@@ -1817,19 +1823,50 @@ function finishQuickConnect(): void {
   renderAll();
 }
 
+// Toggle a target node in/out of the pending queue — nothing is created yet.
 function handleQuickConnectClick(targetNodeId: string): boolean {
   if (!quickConnectMode) return false;
   const targetNode = store.getNode(targetNodeId);
   if (!targetNode || targetNode.nodeType === "comment" || targetNode.nodeType === "area") return true;
   if (quickConnectSources.includes(targetNodeId)) return true;
-  if (qcConnectedTargets.has(targetNodeId)) return true; // already connected this session
 
-  const NODE_W  = 184, NODE_H = 100, PAD = 30;
+  const el = nodesLayer.querySelector<HTMLElement>(`[data-node-id="${targetNodeId}"]`);
+  const idx = quickConnectPending.indexOf(targetNodeId);
+  if (idx >= 0) {
+    // Un-queue
+    quickConnectPending.splice(idx, 1);
+    if (el) {
+      el.style.outline = quickConnectHovered === targetNodeId ? "2px solid var(--success)" : "";
+      const portIn = el.querySelector<HTMLElement>(".port-in");
+      if (portIn) { portIn.style.background = ""; portIn.style.transform = ""; }
+    }
+  } else {
+    quickConnectPending.push(targetNodeId);
+    if (el) {
+      el.style.outline = "2px solid var(--warning)";
+      const portIn = el.querySelector<HTMLElement>(".port-in");
+      if (portIn) { portIn.style.background = "var(--warning)"; portIn.style.transform = "scale(1.4)"; }
+    }
+  }
+  updateQCBanner();
+  return true;
+}
+
+// Apply all queued connections at once, preserving the relative layout the
+// sources had when Quick Connect was started (so a copy for each target
+// mirrors that arrangement instead of a flat left-to-right row).
+function confirmQuickConnect(): void {
+  if (quickConnectPending.length === 0) { finishQuickConnect(); return; }
+
+  const NODE_H = 100, GROUP_PAD = 40;
   const existing = store.getEdges();
   const allNodes = store.getNodes();
 
-  // Reuse the amount already used elsewhere for the same component classname,
-  // e.g. if "Scrap" is used as ×5 in another recipe, default new edges to ×5 too.
+  const srcNodes = quickConnectSources.map(id => store.getNode(id)).filter(Boolean) as CraftNode[];
+  const relBaseX = Math.min(...srcNodes.map(n => n.position.x));
+  const relBaseY = Math.min(...srcNodes.map(n => n.position.y));
+  const groupH   = Math.max(...srcNodes.map(n => n.position.y)) - relBaseY + NODE_H;
+
   const amountForClassname = (classname: string): number => {
     for (const e of existing) {
       const sNode = allNodes.find(n => n.id === e.sourceNodeId);
@@ -1838,49 +1875,44 @@ function handleQuickConnectClick(targetNodeId: string): boolean {
     return 1;
   };
 
-  const row = qcPlacedRows;
-  quickConnectSources.forEach((srcId, i) => {
-    const src = store.getNode(srcId);
-    if (!src) return;
+  let connected = 0;
+  quickConnectPending.forEach((targetNodeId, row) => {
+    const targetNode = store.getNode(targetNodeId);
+    if (!targetNode) return;
+    const rowOriginY = qcOriginY + row * (groupH + GROUP_PAD);
 
-    const alreadyEdge = existing.some(
-      e => e.sourceNodeId === srcId && e.targetNodeId === targetNodeId
-    );
-    if (alreadyEdge) return;
+    quickConnectSources.forEach((srcId, i) => {
+      const src = store.getNode(srcId);
+      if (!src) return;
+      const alreadyEdge = existing.some(
+        e => e.sourceNodeId === srcId && e.targetNodeId === targetNodeId
+      );
+      if (alreadyEdge) return;
 
-    // Place copies in a grid in the staging area below the originally
-    // selected sources: one column per source, one row per target clicked.
-    const newX = snap(qcOriginX + i * (NODE_W + PAD));
-    const newY = snap(qcOriginY + row * (NODE_H + PAD));
+      // Preserve each source's position relative to the original selection.
+      const newX = snap(qcOriginX + (src.position.x - relBaseX));
+      const newY = snap(rowOriginY + (src.position.y - relBaseY));
 
-    const newNodeId = `node_qc_${Date.now()}_${i}`;
-    store.addNode({
-      ...JSON.parse(JSON.stringify(src)),
-      id:       newNodeId,
-      position: { x: newX, y: newY },
+      const newNodeId = `node_qc_${Date.now()}_${row}_${i}`;
+      store.addNode({
+        ...JSON.parse(JSON.stringify(src)),
+        id:       newNodeId,
+        position: { x: newX, y: newY },
+      });
+      store.addEdge({
+        id:           `edge_qc_${Date.now()}_${row}_${i}`,
+        sourceNodeId: newNodeId,
+        targetNodeId,
+        amount:       amountForClassname(src.classname),
+        destroy:      true,
+        changehealth: 0,
+      });
     });
-    store.addEdge({
-      id:           `edge_qc_${Date.now()}_${i}`,
-      sourceNodeId: newNodeId,
-      targetNodeId,
-      amount:       amountForClassname(src.classname),
-      destroy:      true,
-      changehealth: 0,
-    });
+    connected++;
   });
-  qcPlacedRows++;
 
-  // Mark this target as connected (stays green)
-  qcConnectedTargets.add(targetNodeId);
-  const el = nodesLayer.querySelector<HTMLElement>(`[data-node-id="${targetNodeId}"]`);
-  if (el) {
-    el.style.outline = "2px solid var(--success)";
-    const portIn = el.querySelector<HTMLElement>(".port-in");
-    if (portIn) { portIn.style.background = "var(--success)"; portIn.style.transform = ""; }
-  }
-
-  showToast(`✓ ${targetNode.classname}`, "success");
-  return true;
+  showToast(`✓ ${connected} Ziel${connected !== 1 ? "e" : ""} verbunden`, "success");
+  finishQuickConnect();
 }
 
 // ── Quick-Add Modal ────────────────────────────────────────
