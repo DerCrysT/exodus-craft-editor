@@ -92,9 +92,11 @@ export interface CraftNode {
   displayName: string;
   imageUrl?: string;
   position: NodePosition;
-  nodeType?: "recipe" | "comment";   // default = "recipe"
-  commentText?: string;              // only for comment nodes
-  commentColor?: string;             // background tint for comment
+  nodeType?: "recipe" | "comment" | "area";   // default = "recipe"
+  commentText?: string;              // comment + area nodes
+  commentColor?: string;             // background tint
+  areaWidth?: number;                // area node width in canvas px
+  areaHeight?: number;               // area node height in canvas px
   // Recipe properties (shown on node)
   recipeName?: string;
   craftType?: CraftItem["CraftType"];

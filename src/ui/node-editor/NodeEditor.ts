@@ -205,6 +205,12 @@ function onCanvasMouseDown(e: MouseEvent): void {
     e.stopPropagation();
     const id = nodeEl.dataset.nodeId!;
 
+    // ── Quick Connect mode: clicking a node connects it ───────
+    if (quickConnectMode) {
+      handleQuickConnectClick(id);
+      return;
+    }
+
     // ── Ctrl/Cmd+click = chain isolation filter ───────────────
     // Must be checked BEFORE double-click detection
     if ((e.ctrlKey || e.metaKey) && nodeEl.classList.contains("craft-node")) {
@@ -303,7 +309,22 @@ function onWindowMouseMove(e: MouseEvent): void {
       store.moveNode(nid, nx, ny);
     });
 
-    // Re-render edges AND labels so they follow the nodes in real time
+    // Edge-pan: scroll canvas when dragging near the viewport edge
+    const rect    = root.getBoundingClientRect();
+    const EDGE    = 60; // px from edge to start panning
+    const PAN_SPD = 8;  // px per frame
+    let   panDX   = 0, panDY = 0;
+    if (e.clientX - rect.left  < EDGE) panDX = -PAN_SPD;
+    if (rect.right  - e.clientX < EDGE) panDX =  PAN_SPD;
+    if (e.clientY - rect.top   < EDGE) panDY = -PAN_SPD;
+    if (rect.bottom - e.clientY < EDGE) panDY =  PAN_SPD;
+    if (panDX !== 0 || panDY !== 0) {
+      ox += panDX; oy += panDY;
+      applyTransform();
+      // Adjust drag origin so nodes don't jump
+      dragMX0 += panDX; dragMY0 += panDY;
+    }
+
     renderEdges();
     dragMoved = true;
     return;
@@ -375,20 +396,25 @@ function onKeyDown(e: KeyboardEvent): void {
     const ids = [...state.selectedNodes];
     if (ids.length === 0) return;
     const nodes = ids.map(id => store.getNode(id)!).filter(Boolean);
-    const wsKey = store.currentWorkspaceKey();
-    copyNodesToClipboard(nodes, wsKey);
+    copyNodesToClipboard(nodes, store.currentWorkspaceKey());
     showToast(`${nodes.length} Node${nodes.length !== 1 ? "s" : ""} kopiert`, "success");
   }
 
-  // Ctrl+V — paste clipboard nodes at offset position
   if (ctrl && e.key === "v") {
     e.preventDefault();
     const clip = getClipboard();
     if (!clip || clip.nodes.length === 0) return;
 
-    const PASTE_OFFSET = 40;
-    const newIds: string[] = [];
+    // Paste at canvas center offset from original position
+    const rect = root.getBoundingClientRect();
+    const centerX = (rect.width  / 2 - ox) / zoom;
+    const centerY = (rect.height / 2 - oy) / zoom;
 
+    // Find bounding box of copied nodes
+    const minX = Math.min(...clip.nodes.map(n => n.position.x));
+    const minY = Math.min(...clip.nodes.map(n => n.position.y));
+
+    const newIds: string[] = [];
     clip.nodes.forEach((srcNode, i) => {
       const id = `node_paste_${Date.now()}_${i}`;
       newIds.push(id);
@@ -397,16 +423,14 @@ function onKeyDown(e: KeyboardEvent): void {
         ...JSON.parse(JSON.stringify(srcNode)),
         id,
         imageUrl: lib?.imageUrl ?? srcNode.imageUrl,
-        // Preserve category but clear attachments (target workbench may differ)
-        attachmentsNeed: store.getWorkbenchTools(),
+        // Keep ALL properties: category, craftType, attachmentsNeed, resultCount etc.
         position: {
-          x: srcNode.position.x + PASTE_OFFSET,
-          y: srcNode.position.y + PASTE_OFFSET,
+          x: snap(centerX + (srcNode.position.x - minX)),
+          y: snap(centerY + (srcNode.position.y - minY)),
         },
       });
     });
 
-    // Select pasted nodes
     store.deselectAll();
     newIds.forEach(id => store.selectNode(id, true));
     showToast(`${newIds.length} Node${newIds.length !== 1 ? "s" : ""} eingefügt`, "success");
@@ -414,9 +438,11 @@ function onKeyDown(e: KeyboardEvent): void {
 
   if (e.key === "f" || e.key === "F") { e.preventDefault(); fitAll(); }
   if (e.key === "Escape") {
+    if (quickConnectMode) { finishQuickConnect(); return; }
     store.deselectAll(); cancelDraftEdge();
     if (focusedNodeId) { focusedNodeId = null; updateCategoryFilterUI(); renderAll(); }
   }
+  if (e.key === "Enter" && quickConnectMode) { finishQuickConnect(); return; }
 
   // Arrow nudge
   if (["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key) && state.selectedNodes.size > 0) {
@@ -820,7 +846,7 @@ function renderNodes(): void {
   // Which nodes should be in the DOM right now
   const shouldRender = new Set(
     allNodes
-      .filter(n => visibleIds === null || visibleIds.has(n.id) || n.nodeType === "comment")
+      .filter(n => visibleIds === null || visibleIds.has(n.id) || n.nodeType === "comment" || n.nodeType === "area")
       .map(n => n.id)
   );
 
@@ -860,11 +886,12 @@ function renderNodes(): void {
 
 function buildNodeEl(node: CraftNode): HTMLElement {
   const el = document.createElement("div");
-  el.className  = node.nodeType === "comment" ? "comment-node" : "craft-node";
+  el.className  = node.nodeType === "comment" ? "comment-node"
+                : node.nodeType === "area"    ? "area-node"
+                : "craft-node";
   el.dataset.nodeId = node.id;
 
-  // Port events (only for recipe nodes)
-  if (node.nodeType !== "comment") {
+  if (node.nodeType !== "comment" && node.nodeType !== "area") {
     el.addEventListener("mousedown", e => {
       const port = (e.target as HTMLElement).closest<HTMLElement>(".port");
       if (port) {
@@ -984,21 +1011,122 @@ function updateNodeEl(el: HTMLElement, node: CraftNode, selected: boolean): void
   el.style.left = `${node.position.x}px`;
   el.style.top  = `${node.position.y}px`;
 
+  // ── Area Node (background region) ─────────────────────────
+  if (node.nodeType === "area") {
+    el.className = "area-node" + (selected ? " selected" : "");
+    const w = node.areaWidth  ?? 400;
+    const h = node.areaHeight ?? 300;
+    el.style.width  = `${w}px`;
+    el.style.height = `${h}px`;
+    el.style.background = node.commentColor ?? "rgba(255,100,100,0.08)";
+    el.style.border = `2px solid ${node.commentColor?.replace(/[\d.]+\)$/, "0.4)") ?? "rgba(255,100,100,0.4)"}`;
+    el.style.borderRadius = "8px";
+    el.style.zIndex = "-1"; // behind other nodes
+    el.style.boxSizing = "border-box";
+
+    const AREA_COLORS = [
+      "rgba(255,80,80,0.1)",   // rot
+      "rgba(255,180,50,0.1)",  // orange
+      "rgba(80,200,80,0.1)",   // grün
+      "rgba(50,150,255,0.1)",  // blau
+      "rgba(180,80,255,0.1)",  // lila
+      "rgba(60,220,200,0.1)",  // türkis
+      "rgba(180,180,180,0.08)",// grau
+    ];
+
+    el.innerHTML = `
+      <div class="area-header" style="
+        display:flex;align-items:center;gap:4px;padding:4px 8px;
+        background:${node.commentColor?.replace(/[\d.]+\)$/, "0.25)") ?? "rgba(255,100,100,0.25)"};
+        border-radius:6px 6px 0 0;cursor:move;user-select:none;
+      ">
+        <span class="area-drag-handle" style="flex:1;font-size:11px;font-weight:600;
+          color:white;text-shadow:0 1px 2px rgba(0,0,0,0.5);">
+          ${esc(node.commentText ?? "Bereich")}
+        </span>
+        ${AREA_COLORS.map(c => `<button class="comment-color-btn" data-color="${c}"
+          style="width:12px;height:12px;border-radius:50%;background:${c.replace("0.1","0.6")};
+          border:1px solid rgba(255,255,255,0.3);cursor:pointer;padding:0;"
+          title="Farbe"></button>`).join("")}
+        <button class="comment-edit-btn"
+          style="background:transparent;border:none;color:white;cursor:pointer;
+          font-size:11px;padding:0 2px;opacity:0.8;">✎</button>
+      </div>
+      <div class="area-resize-handle" title="Ziehen zum Skalieren"
+        style="position:absolute;bottom:0;right:0;width:16px;height:16px;
+        cursor:se-resize;display:flex;align-items:flex-end;justify-content:flex-end;
+        padding:2px;color:rgba(255,255,255,0.4);font-size:10px;">⊞</div>
+    `;
+
+    const textEl    = el.querySelector<HTMLElement>(".area-drag-handle")!;
+    const editBtn   = el.querySelector<HTMLElement>(".comment-edit-btn")!;
+    const resizeEl  = el.querySelector<HTMLElement>(".area-resize-handle")!;
+
+    editBtn.addEventListener("click", ev => {
+      ev.stopPropagation();
+      const newLabel = prompt("Bereichsname:", node.commentText ?? "Bereich");
+      if (newLabel !== null) store.updateNode(node.id, { commentText: newLabel });
+    });
+
+    el.querySelectorAll<HTMLElement>(".comment-color-btn").forEach(btn => {
+      btn.addEventListener("click", ev => {
+        ev.stopPropagation();
+        store.updateNode(node.id, { commentColor: btn.dataset.color });
+      });
+    });
+
+    // Resize handle drag
+    let rsx = 0, rsy = 0, rw0 = 0, rh0 = 0;
+    resizeEl.addEventListener("mousedown", (ev: MouseEvent) => {
+      ev.stopPropagation();
+      rsx = ev.clientX; rsy = ev.clientY;
+      rw0 = node.areaWidth  ?? 400;
+      rh0 = node.areaHeight ?? 300;
+      const onMove = (me: MouseEvent) => {
+        const nw = Math.max(150, rw0 + (me.clientX - rsx) / zoom);
+        const nh = Math.max(100, rh0 + (me.clientY - rsy) / zoom);
+        store.updateNode(node.id, { areaWidth: Math.round(nw), areaHeight: Math.round(nh) });
+      };
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup",   onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup",   onUp);
+    });
+
+    return;
+  }
+
   // ── Comment Node ──────────────────────────────────────────
   if (node.nodeType === "comment") {
     el.className = "comment-node" + (selected ? " selected" : "");
     el.style.background = node.commentColor ?? "rgba(255,200,50,0.12)";
+    const COLORS = [
+      "rgba(255,200,50,0.2)",   // gelb
+      "rgba(100,200,255,0.2)",  // blau
+      "rgba(150,255,150,0.2)",  // grün
+      "rgba(255,100,100,0.2)",  // rot
+      "rgba(200,130,255,0.2)",  // lila
+      "rgba(255,160,60,0.2)",   // orange
+      "rgba(60,220,200,0.2)",   // türkis
+      "rgba(255,100,180,0.2)",  // pink
+      "rgba(180,180,180,0.15)", // grau
+      "rgba(255,255,255,0.08)", // weiß/transparent
+    ];
     el.innerHTML = `
       <div class="comment-drag-handle" title="Ziehen zum Verschieben">✎ Kommentar</div>
       <div class="comment-text" contenteditable="false"
         data-node-id="${node.id}">${esc(node.commentText ?? "Kommentar…")}</div>
-      <div style="display:flex;gap:3px;padding:3px 6px;flex-wrap:wrap;">
-        ${["rgba(255,200,50,0.18)","rgba(100,200,255,0.18)","rgba(150,255,150,0.18)","rgba(255,120,120,0.18)","rgba(200,150,255,0.18)"]
-          .map(c => `<button class="comment-color-btn" data-color="${c}"
-            style="width:14px;height:14px;border-radius:50%;background:${c};
-            border:1px solid rgba(255,255,255,0.3);cursor:pointer;padding:0;"
-            title="Farbe ändern"></button>`).join("")}
-        <button class="comment-edit-btn" title="Text bearbeiten (oder Doppelklick)" style="margin-left:auto;background:transparent;border:none;color:rgba(255,200,50,0.6);cursor:pointer;font-size:11px;padding:1px 4px;">✎</button>
+      <div style="display:flex;gap:3px;padding:3px 6px;flex-wrap:wrap;align-items:center;">
+        ${COLORS.map(c => `<button class="comment-color-btn" data-color="${c}"
+          style="width:14px;height:14px;border-radius:50%;background:${c};
+          border:2px solid ${node.commentColor === c ? "white" : "rgba(255,255,255,0.2)"};
+          cursor:pointer;padding:0;flex-shrink:0;"
+          title="Farbe"></button>`).join("")}
+        <button class="comment-edit-btn" title="Text bearbeiten"
+          style="margin-left:auto;background:transparent;border:none;
+          color:rgba(255,200,50,0.7);cursor:pointer;font-size:11px;padding:1px 4px;">✎</button>
       </div>
     `;
 
@@ -1541,19 +1669,123 @@ function addCommentNode(x: number, y: number): void {
     position: { x, y },
     nodeType: "comment",
     commentText: "Kommentar…",
-    commentColor: "rgba(255,200,50,0.12)",
+    commentColor: "rgba(255,200,50,0.2)",
   };
   store.addNode(node);
-
-  // Auto-focus the text after render
   requestAnimationFrame(() => {
     const el = document.querySelector<HTMLElement>(`[data-node-id="${node.id}"] .comment-text`);
-    if (el) {
-      el.contentEditable = "true";
-      el.focus();
-      window.getSelection()?.selectAllChildren(el);
-    }
+    if (el) { el.contentEditable = "true"; el.focus(); window.getSelection()?.selectAllChildren(el); }
   });
+}
+
+function addAreaNode(x: number, y: number): void {
+  const node: CraftNode = {
+    id:          `node_area_${Date.now()}`,
+    classname:   "__area__",
+    displayName: "",
+    position:    { x, y },
+    nodeType:    "area",
+    commentText: "Bereich",
+    commentColor: "rgba(255,80,80,0.1)",
+    areaWidth:   400,
+    areaHeight:  300,
+  };
+  store.addNode(node);
+}
+
+// ── Quick Connect ──────────────────────────────────────────
+// Connects selected component nodes to multiple result nodes.
+// Usage: select component nodes → right-click one → "Quick Connect"
+// Then click result nodes to connect, press Enter/Escape to finish.
+let quickConnectMode = false;
+let quickConnectSources: string[] = [];
+
+function startQuickConnect(clickedId: string): void {
+  const selected = [...store.getState().selectedNodes];
+  if (selected.length === 0) return;
+
+  quickConnectSources = selected;
+  quickConnectMode    = true;
+
+  // Visual feedback
+  const banner = document.createElement("div");
+  banner.id = "quick-connect-banner";
+  banner.style.cssText = `
+    position:fixed;top:80px;left:50%;transform:translateX(-50%);z-index:9500;
+    background:var(--accent);color:white;padding:8px 20px;border-radius:20px;
+    font-size:12px;font-weight:600;box-shadow:0 4px 16px rgba(0,0,0,0.4);
+    pointer-events:none;
+  `;
+  banner.textContent = `⚡ Quick Connect: Klicke auf Ziel-Nodes • Enter = fertig • Esc = abbrechen`;
+  document.body.appendChild(banner);
+
+  // Highlight source nodes
+  quickConnectSources.forEach(id => {
+    const el = nodesLayer.querySelector<HTMLElement>(`[data-node-id="${id}"]`);
+    if (el) el.style.outline = "2px solid var(--accent)";
+  });
+}
+
+function finishQuickConnect(): void {
+  quickConnectMode = false;
+  quickConnectSources = [];
+  document.getElementById("quick-connect-banner")?.remove();
+  nodesLayer.querySelectorAll<HTMLElement>(".craft-node").forEach(el => {
+    el.style.outline = "";
+  });
+  renderAll();
+}
+
+function handleQuickConnectClick(targetNodeId: string): boolean {
+  if (!quickConnectMode) return false;
+  const targetNode = store.getNode(targetNodeId);
+  if (!targetNode || targetNode.nodeType !== "recipe") return true;
+
+  const NODE_W = 184, NODE_H = 100, PAD = 20;
+  const existingEdges = store.getEdges();
+
+  quickConnectSources.forEach((srcId, i) => {
+    const src = store.getNode(srcId);
+    if (!src) return;
+
+    // Check if edge already exists
+    const exists = existingEdges.some(
+      e => e.sourceNodeId === srcId && e.targetNodeId === targetNodeId
+    );
+    if (exists) return;
+
+    // Create a copy of the source node positioned near the target
+    const angle    = (i / quickConnectSources.length) * 2 * Math.PI - Math.PI / 2;
+    const radius   = 260;
+    const newX     = snap(targetNode.position.x - radius + Math.cos(angle) * 80);
+    const newY     = snap(targetNode.position.y + 40 + i * (NODE_H + PAD));
+
+    const newNodeId = `node_qc_${Date.now()}_${i}`;
+    store.addNode({
+      ...JSON.parse(JSON.stringify(src)),
+      id:       newNodeId,
+      position: { x: newX, y: newY },
+    });
+
+    store.addEdge({
+      id:           `edge_qc_${Date.now()}_${i}`,
+      sourceNodeId: newNodeId,
+      targetNodeId,
+      amount:       1,
+      destroy:      true,
+      changehealth: 0,
+    });
+  });
+
+  // Flash the target node
+  const el = nodesLayer.querySelector<HTMLElement>(`[data-node-id="${targetNodeId}"]`);
+  if (el) {
+    el.style.outline = "2px solid var(--success)";
+    setTimeout(() => { el.style.outline = ""; }, 600);
+  }
+
+  showToast(`${quickConnectSources.length} Verbindungen zu ${targetNode.classname} erstellt`, "success");
+  return true;
 }
 
 // ── Quick-Add Modal ────────────────────────────────────────
@@ -1671,18 +1903,24 @@ function showContextMenu(mx: number, my: number, nodeId: NodeId | null): void {
   };
 
   if (nodeId) {
+    const selCount = store.getState().selectedNodes.size;
     menu.appendChild(item("Eigenschaften",  "⚙", () => openNodePropertiesModal(nodeId)));
     menu.appendChild(item("Duplizieren",    "⎘", () => {
       const n = store.getNode(nodeId); if (!n) return;
       store.addNode({ ...JSON.parse(JSON.stringify(n)),
         id: `node_${Date.now()}`, position: { x: n.position.x + 40, y: n.position.y + 40 } });
     }));
+    if (selCount > 1) {
+      menu.appendChild(sep());
+      menu.appendChild(item(`⚡ Quick Connect (${selCount} Nodes)`, "⚡", () => startQuickConnect(nodeId)));
+    }
     menu.appendChild(sep());
     menu.appendChild(item("Node löschen",   "🗑", () => store.removeNode(nodeId), true));
   } else {
     const pos = toCanvas(mx, my);
     menu.appendChild(item("Node hinzufügen", "+", () => openQuickAddModal(snap(pos.x), snap(pos.y))));
-    menu.appendChild(item("💬 Kommentar hinzufügen", "💬", () => addCommentNode(snap(pos.x), snap(pos.y))));
+    menu.appendChild(item("💬 Kommentar",    "💬", () => addCommentNode(snap(pos.x), snap(pos.y))));
+    menu.appendChild(item("🟥 Bereich",      "🟥", () => addAreaNode(snap(pos.x), snap(pos.y))));
     menu.appendChild(item("Auto Layout",     "⚙", autoLayout));
     menu.appendChild(item("Alles einpassen", "⊡", fitAll));
     menu.appendChild(sep());

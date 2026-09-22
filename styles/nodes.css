@@ -359,6 +359,37 @@
   overflow: hidden;
 }
 .comment-node.selected { border-color: var(--accent); border-style: solid; }
+
+/* ── Area Node (background region) ── */
+.area-node {
+  position: absolute;
+  border-radius: 8px;
+  cursor: default;
+  user-select: none;
+  z-index: 0; /* always behind craft-nodes */
+  overflow: visible;
+  box-sizing: border-box;
+}
+.area-node.selected { outline: 2px solid var(--accent); }
+.area-node .area-header {
+  cursor: grab;
+}
+.area-node .area-header:active { cursor: grabbing; }
+.area-node .area-resize-handle {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 18px;
+  height: 18px;
+  cursor: se-resize;
+  color: rgba(255,255,255,0.3);
+  font-size: 12px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 2px;
+}
+.area-node:hover .area-resize-handle { color: rgba(255,255,255,0.6); }
 .comment-drag-handle {
   padding: 4px 8px;
   font-size: 10px;
