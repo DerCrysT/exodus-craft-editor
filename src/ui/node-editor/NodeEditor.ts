@@ -814,6 +814,32 @@ export function focusOnEdge(edgeId: EdgeId): void {
   else showToast("Kante/Node nicht mehr vorhanden", "warning");
 }
 
+// ── Classname highlight (e.g. resource chain overlay) ────────
+// Outlines every node instance whose classname is in the map — a classname
+// can appear on several node instances across the project, all get marked.
+let chainHighlightMap: Map<string, { color: string; dashed: boolean }> | null = null;
+
+export function highlightClassnames(map: Map<string, { color: string; dashed: boolean }>): void {
+  chainHighlightMap = map;
+  applyChainHighlight();
+}
+
+export function clearClassnameHighlight(): void {
+  chainHighlightMap = null;
+  nodesLayer.querySelectorAll<HTMLElement>(".craft-node").forEach(el => { el.style.outline = ""; });
+}
+
+function applyChainHighlight(): void {
+  if (!chainHighlightMap) return;
+  const map = chainHighlightMap;
+  nodesLayer.querySelectorAll<HTMLElement>(".craft-node").forEach(el => {
+    const id   = el.dataset.nodeId;
+    const node = id ? store.getNode(id) : undefined;
+    const style = node ? map.get(node.classname) : undefined;
+    el.style.outline = style ? `3px ${style.dashed ? "dashed" : "solid"} ${style.color}` : "";
+  });
+}
+
 // ── Visibility calculation ─────────────────────────────────
 // Returns which node IDs should be visible given current filters.
 // Both filters can be active simultaneously.
@@ -943,6 +969,8 @@ function renderNodes(): void {
       updateNodeEl(el, node, state.selectedNodes.has(node.id));
     }
   });
+
+  applyChainHighlight();
 }
 
 function buildNodeEl(node: CraftNode): HTMLElement {
