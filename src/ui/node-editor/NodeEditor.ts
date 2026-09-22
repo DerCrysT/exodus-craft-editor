@@ -65,11 +65,13 @@ export function initNodeEditor(): void {
   root        = document.getElementById("node-editor-root")!;
   nodesLayer  = document.getElementById("canvas-nodes")!;
   edgesSVG    = document.getElementById("canvas-edges") as unknown as SVGSVGElement;
-  // Allow pointer events on interactive child elements despite CSS pointer-events:none on container
-  // We set this via attribute which overrides CSS in SVG
   edgesGroup  = document.getElementById("edges-group") as unknown as SVGGElement;
   draftPath   = document.getElementById("draft-edge") as unknown as SVGPathElement;
   selBox      = document.getElementById("selection-box")!;
+
+  // Make root focusable so keydown always fires when clicking canvas
+  root.tabIndex = 0;
+  root.style.outline = "none";
 
   // Note: edge labels are now rendered as SVG elements in edgesGroup
   // so they automatically follow pan/zoom via the group transform
@@ -190,9 +192,15 @@ function onCanvasMouseDown(e: MouseEvent): void {
     return;
   }
 
-  // Port click → start draft edge
+  // Port click → Quick Connect or start draft edge
   if (target.classList.contains("port") && e.button === 0) {
     e.stopPropagation();
+    // In Quick Connect mode: clicking the IN port connects this node as target
+    if (quickConnectMode && target.dataset.port === "in") {
+      const nodeId = target.dataset.node!;
+      handleQuickConnectClick(nodeId);
+      return;
+    }
     draftSrc  = target.dataset.node!;
     draftPort = target.dataset.port as "in" | "out";
     draftPath.style.display = "";
@@ -319,10 +327,9 @@ function onWindowMouseMove(e: MouseEvent): void {
     });
 
     // Edge-pan: scroll canvas when dragging near the viewport edge
-    // Progressive speed: faster the closer to the edge
     const rect     = root.getBoundingClientRect();
-    const EDGE     = 100; // px from edge where panning starts
-    const MAX_SPD  = 20;  // max px per frame at the very edge
+    const EDGE     = 120;
+    const MAX_SPD  = 25;
     let   panDX    = 0, panDY = 0;
 
     const distLeft   = e.clientX - rect.left;
@@ -330,17 +337,17 @@ function onWindowMouseMove(e: MouseEvent): void {
     const distTop    = e.clientY - rect.top;
     const distBottom = rect.bottom - e.clientY;
 
-    // Speed ramps up linearly as you get closer to the edge
-    if (distLeft   < EDGE) panDX = -MAX_SPD * (1 - distLeft   / EDGE);
-    if (distRight  < EDGE) panDX =  MAX_SPD * (1 - distRight  / EDGE);
-    if (distTop    < EDGE) panDY = -MAX_SPD * (1 - distTop    / EDGE);
-    if (distBottom < EDGE) panDY =  MAX_SPD * (1 - distBottom / EDGE);
+    // When dragging toward right edge → scroll right → ox decreases
+    if (distLeft   < EDGE) panDX =  MAX_SPD * (1 - distLeft   / EDGE); // drag left  → canvas right (ox+)
+    if (distRight  < EDGE) panDX = -MAX_SPD * (1 - distRight  / EDGE); // drag right → canvas left  (ox-)
+    if (distTop    < EDGE) panDY =  MAX_SPD * (1 - distTop    / EDGE); // drag up    → canvas down  (oy+)
+    if (distBottom < EDGE) panDY = -MAX_SPD * (1 - distBottom / EDGE); // drag down  → canvas up    (oy-)
 
     if (panDX !== 0 || panDY !== 0) {
       ox += panDX; oy += panDY;
       applyTransform();
-      // Shift drag origin so nodes don't jump relative to cursor
-      dragMX0 -= panDX; dragMY0 -= panDY;
+      // Adjust origin so the node stays under cursor
+      dragMX0 += panDX; dragMY0 += panDY;
     }
 
     renderEdges();
@@ -460,7 +467,14 @@ function onKeyDown(e: KeyboardEvent): void {
     store.deselectAll(); cancelDraftEdge();
     if (focusedNodeId) { focusedNodeId = null; updateCategoryFilterUI(); renderAll(); }
   }
-  if (e.key === "Enter" && quickConnectMode) { finishQuickConnect(); return; }
+  if (e.key === "Enter" && quickConnectMode) {
+    if (quickConnectHovered) {
+      handleQuickConnectClick(quickConnectHovered);
+    } else {
+      finishQuickConnect();
+    }
+    return;
+  }
 
   // Arrow nudge
   if (["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key) && state.selectedNodes.size > 0) {
@@ -1715,8 +1729,9 @@ function addAreaNode(x: number, y: number): void {
 // Connects selected component nodes to multiple result nodes.
 // Usage: select component nodes → right-click one → "Quick Connect"
 // Then click result nodes to connect, press Enter/Escape to finish.
-let quickConnectMode = false;
+let quickConnectMode    = false;
 let quickConnectSources: string[] = [];
+let quickConnectHovered: string | null = null; // last hovered target node
 
 function startQuickConnect(clickedId: string): void {
   const selected = [...store.getState().selectedNodes];
@@ -1754,28 +1769,41 @@ function startQuickConnect(clickedId: string): void {
   });
 }
 
+const qcConnectedTargets = new Set<string>();
+
 function onQCNodeHover(e: Event): void {
   const el = (e.currentTarget as HTMLElement);
   if (!quickConnectMode) return;
+  quickConnectHovered = el.dataset.nodeId ?? null;
   el.style.outline = "2px solid var(--success)";
+  const portIn = el.querySelector<HTMLElement>(".port-in");
+  if (portIn) { portIn.style.background = "var(--success)"; portIn.style.transform = "scale(1.4)"; }
 }
 
 function onQCNodeLeave(e: Event): void {
-  const el = (e.currentTarget as HTMLElement);
+  const el  = (e.currentTarget as HTMLElement);
   const nid = el.dataset.nodeId!;
-  // Keep green if already connected in this session
-  if (!quickConnectSources.includes(nid)) el.style.outline = "";
+  if (quickConnectHovered === nid) quickConnectHovered = null;
+  if (!qcConnectedTargets.has(nid)) {
+    el.style.outline = "";
+    const portIn = el.querySelector<HTMLElement>(".port-in");
+    if (portIn) { portIn.style.background = ""; portIn.style.transform = ""; }
+  }
 }
 
 function finishQuickConnect(): void {
-  quickConnectMode = false;
+  quickConnectMode    = false;
   quickConnectSources = [];
+  quickConnectHovered = null;
+  qcConnectedTargets.clear();
   document.getElementById("quick-connect-banner")?.remove();
   nodesLayer.querySelectorAll<HTMLElement>(".craft-node").forEach(el => {
     el.style.outline = "";
     el.style.cursor  = "";
     el.removeEventListener("mouseenter", onQCNodeHover);
     el.removeEventListener("mouseleave", onQCNodeLeave);
+    const portIn = el.querySelector<HTMLElement>(".port-in");
+    if (portIn) { portIn.style.background = ""; portIn.style.transform = ""; }
   });
   renderAll();
 }
@@ -1818,9 +1846,14 @@ function handleQuickConnectClick(targetNodeId: string): boolean {
     });
   });
 
-  // Mark this target node green
+  // Mark this target as connected (stays green)
+  qcConnectedTargets.add(targetNodeId);
   const el = nodesLayer.querySelector<HTMLElement>(`[data-node-id="${targetNodeId}"]`);
-  if (el) el.style.outline = "2px solid var(--success)";
+  if (el) {
+    el.style.outline = "2px solid var(--success)";
+    const portIn = el.querySelector<HTMLElement>(".port-in");
+    if (portIn) { portIn.style.background = "var(--success)"; portIn.style.transform = ""; }
+  }
 
   showToast(`✓ ${targetNode.classname}`, "success");
   return true;
@@ -1948,6 +1981,39 @@ function showContextMenu(mx: number, my: number, nodeId: NodeId | null): void {
       store.addNode({ ...JSON.parse(JSON.stringify(n)),
         id: `node_${Date.now()}`, position: { x: n.position.x + 40, y: n.position.y + 40 } });
     }));
+    menu.appendChild(sep());
+    menu.appendChild(item(`Kopieren (${selCount > 1 ? selCount + " Nodes" : "Node"})`, "⎘", () => {
+      const ids   = selCount > 1 ? [...store.getState().selectedNodes] : [nodeId];
+      const nodes = ids.map(id => store.getNode(id)!).filter(Boolean);
+      copyNodesToClipboard(nodes, store.currentWorkspaceKey());
+      showToast(`${nodes.length} Node${nodes.length !== 1 ? "s" : ""} kopiert`, "success");
+    }));
+    const clip = getClipboard();
+    if (clip && clip.nodes.length > 0) {
+      menu.appendChild(item(`Einfügen (${clip.nodes.length} Nodes)`, "⎘", () => {
+        const minX   = Math.min(...clip.nodes.map(n => n.position.x));
+        const minY   = Math.min(...clip.nodes.map(n => n.position.y));
+        const maxX   = Math.max(...clip.nodes.map(n => n.position.x));
+        const maxY   = Math.max(...clip.nodes.map(n => n.position.y));
+        const cSrcX  = (minX + maxX) / 2;
+        const cSrcY  = (minY + maxY) / 2;
+        const pos    = toCanvas(mx, my);
+        const offX   = pos.x - cSrcX;
+        const offY   = pos.y - cSrcY;
+        const newIds: string[] = [];
+        clip.nodes.forEach((srcNode, i) => {
+          const id = `node_paste_${Date.now()}_${i}`;
+          newIds.push(id);
+          const lib = store.getLibrary().find(l => l.classname === srcNode.classname);
+          store.addNode({ ...JSON.parse(JSON.stringify(srcNode)), id,
+            imageUrl: lib?.imageUrl ?? srcNode.imageUrl,
+            position: { x: snap(srcNode.position.x + offX), y: snap(srcNode.position.y + offY) } });
+        });
+        store.deselectAll();
+        newIds.forEach(id => store.selectNode(id, true));
+        showToast(`${newIds.length} eingefügt`, "success");
+      }));
+    }
     if (selCount > 1) {
       menu.appendChild(sep());
       menu.appendChild(item(`✏ Mass Edit (${selCount} Nodes)`, "✏", () => {
@@ -1956,7 +2022,7 @@ function showContextMenu(mx: number, my: number, nodeId: NodeId | null): void {
       menu.appendChild(item(`⚡ Quick Connect (${selCount} Nodes)`, "⚡", () => startQuickConnect(nodeId)));
     }
     menu.appendChild(sep());
-    menu.appendChild(item("Node löschen",   "🗑", () => store.removeNode(nodeId), true));
+    menu.appendChild(item("Node löschen", "🗑", () => store.removeNode(nodeId), true));
     if (selCount > 1) {
       menu.appendChild(item(`${selCount} Nodes löschen`, "🗑",
         () => { [...store.getState().selectedNodes].forEach(id => store.removeNode(id)); }, true));
