@@ -781,6 +781,38 @@ export function fitAll(): void {
   applyTransform();
 }
 
+// ── Focus (jump to node from validation panel etc.) ─────────
+export function focusOnNode(nodeId: NodeId): void {
+  const node = store.getNode(nodeId);
+  if (!node) { showToast("Node nicht mehr vorhanden", "warning"); return; }
+
+  if (store.getState().activeMode !== "node") store.setMode("node");
+
+  const r = root.getBoundingClientRect();
+  zoom = Math.max(zoom, 0.8);
+  ox = r.width  / 2 - (node.position.x + NODE_W / 2) * zoom;
+  oy = r.height / 2 - (node.position.y + NODE_H / 2) * zoom;
+  applyTransform();
+
+  store.deselectAll();
+  store.selectNode(nodeId);
+  renderAll();
+
+  const el = nodesLayer.querySelector<HTMLElement>(`[data-node-id="${nodeId}"]`);
+  if (el) {
+    el.style.transition = "box-shadow 0.3s ease";
+    el.style.boxShadow  = "0 0 0 5px var(--danger)";
+    setTimeout(() => { el.style.boxShadow = ""; }, 1400);
+  }
+}
+
+export function focusOnEdge(edgeId: EdgeId): void {
+  const edge = store.getEdges().find(e => e.id === edgeId);
+  const node = edge && (store.getNode(edge.sourceNodeId) ?? store.getNode(edge.targetNodeId));
+  if (node) focusOnNode(node.id);
+  else showToast("Kante/Node nicht mehr vorhanden", "warning");
+}
+
 // ── Visibility calculation ─────────────────────────────────
 // Returns which node IDs should be visible given current filters.
 // Both filters can be active simultaneously.

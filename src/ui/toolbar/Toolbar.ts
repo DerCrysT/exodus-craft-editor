@@ -2,6 +2,7 @@ import { store } from "../../state/AppStore";
 import { bus } from "../../state/EventEmitter";
 import { downloadFile, readFileAsText, parseJSON } from "../../data/jsonHandler";
 import { runValidation } from "../../data/validator";
+import { openValidationPanel } from "../panels/ValidationPanel";
 import type { ExodusCraftProject, Faction, WorkbenchType } from "../../types/index";
 import { getWorkbenchClassname } from "../../data/workbenches";
 import { openDependencyGraph } from "../panels/DependencyGraph";
@@ -117,11 +118,10 @@ export function initToolbar(): void {
 
   // ── Validate ──
   document.getElementById("tb-validate")!.addEventListener("click", () => {
-    const state = store.getState();
-    const issues = runValidation(state.project.nodes, state.project.edges, state.project.jsonData);
-    renderValidationLog(issues);
-    showToast(`Validierung: ${issues.length} Problem${issues.length !== 1 ? "e" : ""} gefunden`,
-      issues.length === 0 ? "success" : "warning");
+    openValidationPanel(() => {
+      const state = store.getState();
+      return runValidation(state.project.nodes, state.project.edges, state.project.jsonData);
+    });
   });
 
   // ── Dependency Graph ──
@@ -316,28 +316,6 @@ export function refreshJSONPreview(): void {
 
 export function setZoomDisplay(zoom: number): void {
   document.getElementById("sb-zoom")!.textContent = `${Math.round(zoom * 100)}%`;
-}
-
-// ── Validation Log ──────────────────────────────────────────
-
-function renderValidationLog(issues: ReturnType<typeof runValidation>): void {
-  const log = document.getElementById("validation-log")!;
-  const container = document.getElementById("validation-items")!;
-
-  container.innerHTML = "";
-  if (issues.length === 0) {
-    container.innerHTML = `<div class="log-item info">✓ Keine Probleme gefunden</div>`;
-  } else {
-    issues.forEach(issue => {
-      const icon = issue.severity === "error" ? "✖" : issue.severity === "warning" ? "⚠" : "ℹ";
-      const div = document.createElement("div");
-      div.className = `log-item ${issue.severity}`;
-      div.textContent = `${icon} ${issue.message}`;
-      container.appendChild(div);
-    });
-  }
-  log.classList.add("open");
-  setTimeout(() => log.classList.remove("open"), 8000);
 }
 
 // ── Toast ───────────────────────────────────────────────────

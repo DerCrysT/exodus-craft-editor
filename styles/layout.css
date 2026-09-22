@@ -327,33 +327,77 @@ html, body {
 .btn-sm { padding: 3px 8px; font-size: 11px; }
 .btn-icon { padding: 4px; border-radius: 4px; }
 
-/* ── Validation Log ── */
-#validation-log {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  max-height: 120px;
-  background: var(--bg-elevated);
-  border-top: 1px solid var(--border);
-  overflow-y: auto;
-  font-size: 11px;
-  z-index: 20;
-  transform: translateY(100%);
-  transition: transform 0.2s;
+/* ── Validation Panel ── */
+/* Non-blocking floating panel (no backdrop) so the canvas stays usable
+   while fixing issues one by one. */
+#validation-panel {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  z-index: 2000;
+  overflow: hidden;
 }
-#validation-log.open { transform: translateY(0); }
+.vp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+}
+.vp-summary {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.vp-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+.vp-badge.error   { background: rgba(232,92,92,0.15);  color: var(--danger); }
+.vp-badge.warning { background: rgba(232,168,64,0.15); color: var(--warning); }
+.vp-badge.info    { background: var(--accent-dim);     color: var(--accent); }
 
-.log-item {
+.vp-list {
+  flex: 1;
+  overflow-y: auto;
+}
+.vp-item {
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  padding: 4px 12px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  line-height: 1.5;
 }
-.log-item.error { color: var(--danger); }
-.log-item.warning { color: var(--warning); }
-.log-item.info { color: var(--info); }
+.vp-item.jumpable { cursor: pointer; }
+.vp-item.jumpable:hover { background: var(--bg-hover); }
+.vp-item.error   { color: var(--danger); }
+.vp-item.warning { color: var(--warning); }
+.vp-item.info    { color: var(--text-secondary); }
+.vp-icon { flex-shrink: 0; }
+.vp-msg  { flex: 1; color: var(--text-primary); }
+.vp-jump { flex-shrink: 0; color: var(--text-muted); }
+.vp-empty {
+  padding: 20px 12px;
+  text-align: center;
+  color: var(--success);
+  font-size: 12px;
+}
 
 /* ── Modal ── */
 .modal-overlay {
