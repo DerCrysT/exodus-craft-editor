@@ -10,8 +10,12 @@ export function runValidation(
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
 
+  // Comment/area nodes are annotations, not recipe nodes — they have no
+  // classname/recipe concept, so skip them for all the checks below.
+  const recipeNodes = nodes.filter(n => n.nodeType !== "comment" && n.nodeType !== "area");
+
   // 1. Missing classnames on nodes
-  nodes.forEach(n => {
+  recipeNodes.forEach(n => {
     if (!n.classname) {
       issues.push({ id: nextId(), severity: "error", message: `Node "${n.id}": Classname fehlt`, nodeId: n.id });
     }
@@ -41,12 +45,30 @@ export function runValidation(
   });
 
   // 4. Unreachable nodes (no edges at all)
-  if (nodes.length > 1) {
+  if (recipeNodes.length > 1) {
     const connected = new Set<string>();
     edges.forEach(e => { connected.add(e.sourceNodeId); connected.add(e.targetNodeId); });
-    nodes.forEach(n => {
+    recipeNodes.forEach(n => {
       if (!connected.has(n.id)) {
         issues.push({ id: nextId(), severity: "info", message: `Node "${n.classname || n.id}": Nicht verbunden`, nodeId: n.id });
+      }
+    });
+  }
+
+  // 4b. Node is a craft result (has at least one incoming edge) but has no
+  // recipe name set — this is the important one: it means the recipe will
+  // export without a name.
+  {
+    const nodeMap = new Map(recipeNodes.map(n => [n.id, n]));
+    const resultTargets = new Set(edges.map(e => e.targetNodeId));
+    resultTargets.forEach(targetId => {
+      const n = nodeMap.get(targetId);
+      if (n && !n.recipeName?.trim()) {
+        issues.push({
+          id: nextId(), severity: "error",
+          message: `Node "${n.classname || n.id}": ist Ergebnis eines Rezepts, aber Rezeptname fehlt`,
+          nodeId: n.id,
+        });
       }
     });
   }
