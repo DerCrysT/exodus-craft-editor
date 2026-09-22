@@ -215,6 +215,7 @@ export async function saveLibraryToFirebase(items: LibraryItem[]): Promise<void>
         displayName: item.displayName,
         category:    item.category ?? null,
         tags:        item.tags     ?? null,
+        tier:        item.tier     ?? null,
         imageUrl,
       };
     }
@@ -230,13 +231,14 @@ export async function loadLibraryFromFirebase(): Promise<LibraryItem[]> {
     return Object.values(val).map((m: unknown) => {
       const item = m as {
         classname: string; displayName: string;
-        category?: string; tags?: string[]; imageUrl?: string;
+        category?: string; tags?: string[]; tier?: number; imageUrl?: string;
       };
       return {
         classname:   item.classname,
         displayName: item.displayName,
         category:    item.category  ?? undefined,
         tags:        item.tags      ?? undefined,
+        tier:        item.tier      ?? undefined,
         imageUrl:    item.imageUrl  ?? undefined,
       };
     });
