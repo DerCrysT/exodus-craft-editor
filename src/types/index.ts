@@ -152,6 +152,7 @@ export interface LibraryItem {
   imageUrl?: string;
   category?: string;
   tags?: string[];
+  tier?: number; // optional 1-4 "Tierstufe", used by Auto-Vervollständigen to compare like with like
 }
 
 // --- App State ---

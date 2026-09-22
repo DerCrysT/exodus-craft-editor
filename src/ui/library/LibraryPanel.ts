@@ -79,6 +79,8 @@ function createLibraryItemEl(item: LibraryItem): HTMLElement {
       <div class="lib-name">${item.displayName}</div>
       <div class="lib-classname">${item.classname}</div>
     </div>
+    ${item.tier ? `<span style="flex-shrink:0;font-size:9px;font-weight:600;padding:1px 5px;
+      border-radius:8px;background:var(--accent-dim);color:var(--accent);">T${item.tier}</span>` : ""}
     <button class="btn btn-ghost btn-icon btn-sm lib-edit-btn" title="Bearbeiten" style="flex-shrink:0;opacity:0.5;">✎</button>
   `;
 
@@ -141,6 +143,13 @@ function openItemModal(existing: LibraryItem | null): void {
         <div class="field-group" style="padding:0">
           <label class="field-label">Kategorie</label>
           <input class="field-input" id="modal-category" value="${existing?.category ?? ""}" placeholder="z.B. Material" />
+        </div>
+        <div class="field-group" style="padding:0">
+          <label class="field-label">Tierstufe <span style="color:var(--text-muted);font-weight:400;text-transform:none;">(optional, für Auto-Vervollständigen)</span></label>
+          <select class="field-input" id="modal-tier">
+            <option value="">— kein Tier —</option>
+            ${[1, 2, 3, 4].map(t => `<option value="${t}" ${existing?.tier === t ? "selected" : ""}>T${t}</option>`).join("")}
+          </select>
         </div>
         <div class="field-group" style="padding:0">
           <label class="field-label">Tags (kommagetrennt)</label>
@@ -206,6 +215,7 @@ function openItemModal(existing: LibraryItem | null): void {
     const displayName = (overlay.querySelector("#modal-displayname") as HTMLInputElement).value.trim();
     const category = (overlay.querySelector("#modal-category") as HTMLInputElement).value.trim();
     const tagsRaw = (overlay.querySelector("#modal-tags") as HTMLInputElement).value.trim();
+    const tierRaw = (overlay.querySelector("#modal-tier") as HTMLSelectElement).value;
 
     if (!classname || !displayName) {
       showToast("Classname und Anzeigename sind Pflichtfelder", "error");
@@ -218,6 +228,7 @@ function openItemModal(existing: LibraryItem | null): void {
       category: category || undefined,
       imageUrl: previewUrl || undefined,
       tags: tagsRaw ? tagsRaw.split(",").map(t => t.trim()).filter(Boolean) : undefined,
+      tier: tierRaw ? Number(tierRaw) : undefined,
     };
 
     store.addLibraryItem(item);

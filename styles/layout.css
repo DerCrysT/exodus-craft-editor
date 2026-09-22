@@ -355,6 +355,31 @@ html, body {
   font-size: 12px;
   font-weight: 600;
 }
+.vp-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+}
+.vp-tab {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 8px 6px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.vp-tab:hover { background: var(--bg-hover); color: var(--text-primary); }
+.vp-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.vp-tab-count {
+  display: inline-block;
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--accent-dim);
+  color: var(--accent);
+}
 .vp-summary {
   display: flex;
   gap: 6px;
